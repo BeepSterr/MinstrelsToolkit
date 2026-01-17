@@ -9,6 +9,7 @@ import MiniAppsPanel from './MiniAppsPanel.vue'
 import MiniAppsContainer from './MiniAppsContainer.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePlayback } from '../composables/usePlayback'
+import { useAssetCache } from '../composables/useAssetCache'
 
 const props = defineProps<{
   campaignId: string
@@ -34,6 +35,12 @@ const {
 } = useWebSocket()
 
 const hasEnabledApps = computed(() => miniAppState.value.enabledApps.length > 0)
+
+const { preCacheAllAssets } = useAssetCache()
+
+const isCaching = ref(false)
+const cachedCount = ref(0)
+const totalCount = ref(0)
 
 const assetListRef = ref<InstanceType<typeof AssetList> | null>(null)
 const playlistPanelRef = ref<InstanceType<typeof PlaylistPanel> | null>(null)
@@ -171,6 +178,19 @@ const unsubscribe = onMessage((message) => {
 
 onMounted(async () => {
   await fetchAssets()
+
+  // Pre-cache all assets
+  if (assets.value.length > 0) {
+    isCaching.value = true
+    totalCount.value = assets.value.length
+    cachedCount.value = 0
+    await preCacheAllAssets(props.campaignId, assets.value, (cached, total) => {
+      cachedCount.value = cached
+      totalCount.value = total
+    })
+    isCaching.value = false
+  }
+
   // Wait for connection before joining campaign
   const checkConnection = setInterval(() => {
     if (connected.value) {
@@ -218,6 +238,13 @@ onUnmounted(() => {
         </button>
       </div>
     </header>
+
+    <div v-if="isCaching && totalCount > 0" class="cache-progress">
+      <span>Caching assets: {{ cachedCount }}/{{ totalCount }}</span>
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: `${(cachedCount / totalCount) * 100}%` }"></div>
+      </div>
+    </div>
 
     <div class="content">
       <main class="playback-area">
@@ -400,6 +427,32 @@ onUnmounted(() => {
 
 .users {
   color: #72767d;
+}
+
+.cache-progress {
+  background: #2f3136;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #40444b;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: #72767d;
+}
+
+.progress-bar {
+  flex: 1;
+  max-width: 300px;
+  height: 4px;
+  background: #40444b;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #5865f2;
+  transition: width 0.2s ease;
 }
 
 .btn-reload {

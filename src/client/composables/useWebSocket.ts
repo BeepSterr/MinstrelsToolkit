@@ -101,6 +101,8 @@ function handleMessage(event: MessageEvent): void {
       }
       break
     case 'reload':
+      // Clear asset cache before reload
+      indexedDB.deleteDatabase('bardbox-cache')
       window.location.reload()
       break
   }

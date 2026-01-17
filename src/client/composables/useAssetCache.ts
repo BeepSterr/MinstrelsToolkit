@@ -82,6 +82,49 @@ export function useAssetCache() {
     return URL.createObjectURL(blob)
   }
 
+  async function getCacheStatus(assets: Asset[]): Promise<{ cached: number; total: number }> {
+    let cached = 0
+    for (const asset of assets) {
+      const existing = await getCachedAsset(asset.id)
+      if (existing && existing.size === asset.size) {
+        cached++
+      }
+    }
+    return { cached, total: assets.length }
+  }
+
+  async function preCacheAllAssets(
+    campaignId: string,
+    assets: Asset[],
+    onProgress?: (cached: number, total: number) => void
+  ): Promise<void> {
+    const total = assets.length
+    let cached = 0
+
+    for (const asset of assets) {
+      const existing = await getCachedAsset(asset.id)
+
+      if (existing && existing.size === asset.size) {
+        cached++
+        onProgress?.(cached, total)
+        continue
+      }
+
+      try {
+        const response = await fetch(`/api/campaigns/${campaignId}/assets/${asset.id}/file`)
+        if (response.ok) {
+          const blob = await response.blob()
+          await cacheAsset(asset, blob)
+        }
+      } catch {
+        // Continue with next asset on failure
+      }
+
+      cached++
+      onProgress?.(cached, total)
+    }
+  }
+
   function revokeAssetUrl(url: string): void {
     if (url.startsWith('blob:')) {
       URL.revokeObjectURL(url)
@@ -95,5 +138,7 @@ export function useAssetCache() {
     clearCampaignCache,
     getAssetUrl,
     revokeAssetUrl,
+    getCacheStatus,
+    preCacheAllAssets,
   }
 }

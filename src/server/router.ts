@@ -209,11 +209,13 @@ const routes: Route[] = [
         return notFound('Asset not found')
       }
 
+      // Use RFC 5987 encoding for non-ASCII filenames
+      const encodedFilename = encodeURIComponent(result.asset.filename)
       return new Response(result.file, {
         headers: {
           'Content-Type': result.asset.mimeType,
           'Content-Length': result.asset.size.toString(),
-          'Content-Disposition': `inline; filename="${result.asset.filename}"`,
+          'Content-Disposition': `inline; filename*=UTF-8''${encodedFilename}`,
         },
       })
     },
