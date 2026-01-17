@@ -1,0 +1,24 @@
+{
+  "name": "bardbox2",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "tunnel": "cloudflared tunnel run --token eyJhIjoiZGY4MDFhMDMwN2E4NGJhMzM4MTNhNTdkMDNmMDMzYjciLCJ0IjoiOTg3ZDdiMjYtNjVjZS00ZThiLWFmYWEtYWQzM2MzZDMzNjE1IiwicyI6Ik1UZzJaV0pqTkdRdE56QXlNUzAwTWpFMUxUa3pOemN0TVdKaE5tWTJZVGMzTUdVeSJ9",
+    "dev": "bun run --watch src/server/index.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "client:dev": "vite"
+  },
+  "dependencies": {
+    "@discord/embedded-app-sdk": "^1.4.3",
+    "idb": "^8.0.0",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.3",
+    "vite": "^5.2.6"
+  }
+}
