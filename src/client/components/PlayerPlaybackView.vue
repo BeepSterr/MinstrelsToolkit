@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { Asset } from '../types'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useAssetCache } from '../composables/useAssetCache'
+import MiniAppsContainer from './MiniAppsContainer.vue'
 
 const props = defineProps<{
   campaignId: string
@@ -15,6 +16,7 @@ const emit = defineEmits<{
 
 const {
   connected,
+  reconnecting,
   identified,
   users,
   playbackState,
@@ -31,7 +33,6 @@ const assetUrl = ref<string | null>(null)
 const loading = ref(false)
 
 const audioRef = ref<HTMLAudioElement | null>(null)
-const videoRef = ref<HTMLVideoElement | null>(null)
 
 // Local volume control (not synced)
 const volume = ref(parseFloat(localStorage.getItem('bardbox-volume') ?? '1'))
@@ -39,12 +40,10 @@ const volume = ref(parseFloat(localStorage.getItem('bardbox-volume') ?? '1'))
 watch(volume, (v) => {
   localStorage.setItem('bardbox-volume', String(v))
   if (audioRef.value) audioRef.value.volume = v
-  if (videoRef.value) videoRef.value.volume = v
 })
 
-watch([audioRef, videoRef], () => {
+watch(audioRef, () => {
   if (audioRef.value) audioRef.value.volume = volume.value
-  if (videoRef.value) videoRef.value.volume = volume.value
 })
 
 async function fetchAssets() {
@@ -72,10 +71,9 @@ async function loadAsset(assetId: string) {
 
 function syncPlayback() {
   const state = playbackState.value
-  const el = currentAsset.value?.type === 'audio' ? audioRef.value :
-             currentAsset.value?.type === 'video' ? videoRef.value : null
+  const el = audioRef.value
 
-  if (!el || !currentAsset.value) return
+  if (!el || currentAsset.value?.type !== 'audio') return
 
   const elapsed = (Date.now() - state.timestamp) / 1000
   const targetTime = state.playing ? state.currentTime + elapsed : state.currentTime
@@ -116,7 +114,7 @@ watch(
   () => syncPlayback()
 )
 
-watch([audioRef, videoRef, currentAsset], () => {
+watch([audioRef, currentAsset], () => {
   syncPlayback()
 })
 
@@ -191,37 +189,15 @@ onUnmounted(() => {
     </header>
 
     <main class="playback-area">
-      <div v-if="loading" class="state-message">
-        <div class="spinner"></div>
-        <p>Loading...</p>
-      </div>
+      <MiniAppsContainer :campaign-id="campaignId" />
 
-      <div v-else-if="!currentAsset" class="state-message">
-        <p class="waiting">Waiting for content...</p>
-        <span class="hint">The game master will select what to display</span>
-      </div>
-
-      <template v-else>
-        <div v-if="currentAsset.type === 'image'" class="media-container">
-          <img :src="assetUrl!" :alt="currentAsset.name" />
-        </div>
-
-        <div v-else-if="currentAsset.type === 'audio'" class="audio-display">
-          <div class="audio-visual">
-            <span class="audio-icon">🎵</span>
-            <span class="audio-name">{{ currentAsset.name }}</span>
-            <span v-if="playbackState.playlistId" class="playlist-info">
-              {{ playbackState.playlistIndex + 1 }} / {{ playbackState.playlistLength }}
-            </span>
-            <span v-if="playbackState.playing" class="playing-indicator">Playing</span>
-          </div>
-          <audio ref="audioRef" :src="assetUrl!"></audio>
-        </div>
-
-        <div v-else-if="currentAsset.type === 'video'" class="media-container">
-          <video ref="videoRef" :src="assetUrl!"></video>
-        </div>
-      </template>
+      <!-- Hidden audio element for background playback -->
+      <audio
+        v-if="currentAsset?.type === 'audio'"
+        ref="audioRef"
+        :src="assetUrl!"
+        class="hidden-audio"
+      ></audio>
     </main>
   </div>
 </template>
@@ -324,116 +300,17 @@ onUnmounted(() => {
 .playback-area {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-}
-
-.state-message {
-  text-align: center;
-  color: #72767d;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  margin: 0 auto 1rem;
-  border: 3px solid #40444b;
-  border-top-color: #5865f2;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.waiting {
-  font-size: 1.25rem;
-  margin: 0 0 0.5rem;
-}
-
-.hint {
-  font-size: 0.875rem;
-}
-
-.media-container {
-  max-width: 100%;
-  max-height: calc(100vh - 150px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.media-container img,
-.media-container video {
-  max-width: 100%;
-  max-height: calc(100vh - 150px);
-  border-radius: 8px;
-  object-fit: contain;
-}
-
-.audio-display {
-  text-align: center;
-}
-
-.audio-visual {
-  display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
 }
 
-.audio-icon {
-  font-size: 5rem;
-}
-
-.audio-name {
-  font-size: 1.5rem;
-  color: #fff;
-}
-
-.playlist-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #72767d;
-  font-size: 0.875rem;
-}
-
-.badge {
-  font-size: 0.75rem;
-}
-
-.playing-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: #3ba55c;
-  color: #fff;
-  border-radius: 20px;
-  font-size: 0.875rem;
-}
-
-.playing-indicator::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  background: #fff;
-  border-radius: 50%;
-  animation: pulse 1s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+.hidden-audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .volume-control {

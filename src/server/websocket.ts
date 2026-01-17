@@ -6,6 +6,7 @@ import type {
   RoomState,
   PlaybackState,
   DiscordUser,
+  MiniAppState,
 } from './types'
 import * as playlistService from './services/playlist'
 
@@ -27,6 +28,13 @@ function getDefaultPlaybackState(): PlaybackState {
   }
 }
 
+function getDefaultMiniAppState(): MiniAppState {
+  return {
+    enabledApps: [],
+    appStates: {},
+  }
+}
+
 function getOrCreateRoom(campaignId: string): RoomState {
   let room = rooms.get(campaignId)
   if (!room) {
@@ -36,6 +44,7 @@ function getOrCreateRoom(campaignId: string): RoomState {
       connections: new Set(),
       users: new Map(),
       playlistOrder: [],
+      miniApps: getDefaultMiniAppState(),
     }
     rooms.set(campaignId, room)
   }
@@ -137,6 +146,18 @@ export function handleMessage(
     case 'queue-jump':
       handleQueueJump(ws, message.assetId)
       break
+    case 'miniapp-enable':
+      handleMiniAppEnable(ws, message.appId)
+      break
+    case 'miniapp-disable':
+      handleMiniAppDisable(ws, message.appId)
+      break
+    case 'miniapp-action':
+      handleMiniAppAction(ws, message.appId, message.action, message.payload)
+      break
+    case 'reload-players':
+      handleReloadPlayers(ws)
+      break
     default:
       send(ws, { type: 'error', message: 'Unknown message type' })
   }
@@ -175,6 +196,7 @@ function handleJoinCampaign(
     campaignId,
     playback: room.playback,
     users: Array.from(room.users.values()),
+    miniApps: room.miniApps,
   })
 }
 
@@ -466,6 +488,201 @@ function handleQueueJump(
   }
 
   broadcast(campaignId, { type: 'playback-state', playback: pb })
+}
+
+// Default states for built-in apps
+const defaultAppStates: Record<string, unknown> = {
+  'media-display': { assetId: null },
+  'dice-roller': { history: [] },
+}
+
+function handleMiniAppEnable(
+  ws: ServerWebSocket<WebSocketData>,
+  appId: string
+): void {
+  const { campaignId } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  // Don't add if already enabled
+  if (room.miniApps.enabledApps.includes(appId)) return
+
+  room.miniApps.enabledApps.push(appId)
+
+  // Initialize default state if not present
+  if (!(appId in room.miniApps.appStates)) {
+    room.miniApps.appStates[appId] = defaultAppStates[appId] ?? {}
+  }
+
+  broadcast(campaignId, { type: 'miniapp-state', miniApps: room.miniApps })
+}
+
+function handleMiniAppDisable(
+  ws: ServerWebSocket<WebSocketData>,
+  appId: string
+): void {
+  const { campaignId } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  const index = room.miniApps.enabledApps.indexOf(appId)
+  if (index === -1) return
+
+  room.miniApps.enabledApps.splice(index, 1)
+  // Keep the state around in case they re-enable
+
+  broadcast(campaignId, { type: 'miniapp-state', miniApps: room.miniApps })
+}
+
+function handleReloadPlayers(ws: ServerWebSocket<WebSocketData>): void {
+  const { campaignId, id: senderId } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  // Send reload message to all clients except the sender (GM)
+  for (const connectionId of room.connections) {
+    if (connectionId === senderId) continue
+    const client = connections.get(connectionId)
+    if (client) {
+      send(client, { type: 'reload' })
+    }
+  }
+}
+
+function handleMiniAppAction(
+  ws: ServerWebSocket<WebSocketData>,
+  appId: string,
+  action: string,
+  payload?: unknown
+): void {
+  const { campaignId, user } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  // Only allow actions on enabled apps
+  if (!room.miniApps.enabledApps.includes(appId)) {
+    send(ws, { type: 'error', message: 'App is not enabled' })
+    return
+  }
+
+  const currentState = room.miniApps.appStates[appId] ?? {}
+  let newState = currentState
+
+  // App-specific reducers
+  if (appId === 'media-display') {
+    newState = reduceMediaDisplay(currentState, action, payload)
+  } else if (appId === 'dice-roller') {
+    newState = reduceDiceRoller(currentState, action, payload, user)
+  }
+
+  room.miniApps.appStates[appId] = newState
+  broadcast(campaignId, { type: 'miniapp-updated', appId, state: newState })
+}
+
+// Reducer for media-display app
+function reduceMediaDisplay(
+  state: unknown,
+  action: string,
+  payload?: unknown
+): unknown {
+  const s = state as { assetId: string | null }
+
+  switch (action) {
+    case 'set-asset':
+      return { ...s, assetId: (payload as { assetId: string | null })?.assetId ?? null }
+    case 'clear':
+      return { ...s, assetId: null }
+    default:
+      return s
+  }
+}
+
+// Reducer for dice-roller app
+function reduceDiceRoller(
+  state: unknown,
+  action: string,
+  payload?: unknown,
+  user?: DiscordUser | null
+): unknown {
+  const s = state as { history: Array<{ id: string; oderId: string; username: string; dice: string; result: number; timestamp: number }> }
+
+  switch (action) {
+    case 'roll': {
+      const p = payload as { dice: string } | undefined
+      const dice = p?.dice ?? 'd20'
+
+      // Parse dice notation (e.g., "d20", "2d6", "d100")
+      const match = dice.match(/^(\d*)d(\d+)$/)
+      if (!match) return s
+
+      const count = parseInt(match[1] || '1', 10)
+      const sides = parseInt(match[2], 10)
+
+      let result = 0
+      for (let i = 0; i < count; i++) {
+        result += Math.floor(Math.random() * sides) + 1
+      }
+
+      const entry = {
+        id: crypto.randomUUID(),
+        oderId: user?.id ?? 'unknown',
+        username: 'GM',
+        dice,
+        result,
+        timestamp: Date.now(),
+      }
+
+      // Keep last 50 rolls
+      const history = [entry, ...s.history].slice(0, 500)
+      return { ...s, history }
+    }
+    case 'fudge': {
+      // GM can set a specific result
+      const p = payload as { dice: string; result: number } | undefined
+      if (!p || typeof p.result !== 'number') return s
+
+      const entry = {
+        id: crypto.randomUUID(),
+        oderId: user?.id ?? 'unknown',
+        username: 'GM',
+        dice: p.dice || 'd20',
+        result: p.result,
+        timestamp: Date.now(),
+      }
+
+      const history = [entry, ...s.history].slice(0, 500)
+      return { ...s, history }
+    }
+    case 'remove': {
+      const p = payload as { id: string } | undefined
+      if (!p?.id) return s
+      return { ...s, history: s.history.filter((r: { id: string }) => r.id !== p.id) }
+    }
+    case 'clear':
+      return { ...s, history: [] }
+    default:
+      return s
+  }
 }
 
 export function createWebSocketData(): WebSocketData {

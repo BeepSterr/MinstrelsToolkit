@@ -1,9 +1,10 @@
 import { ref, shallowRef } from 'vue'
-import type { ClientMessage, ServerMessage, PlaybackState, DiscordUser } from '../types'
+import type { ClientMessage, ServerMessage, PlaybackState, DiscordUser, MiniAppState } from '../types'
 
 const ws = shallowRef<WebSocket | null>(null)
 const connected = ref(false)
 const identified = ref(false)
+const reconnecting = ref(false)
 const currentCampaignId = ref<string | null>(null)
 const playbackState = ref<PlaybackState>({
   assetId: null,
@@ -19,7 +20,17 @@ const playbackState = ref<PlaybackState>({
 })
 const users = ref<DiscordUser[]>([])
 const error = ref<string | null>(null)
+const miniAppState = ref<MiniAppState>({ enabledApps: [], appStates: {} })
+
+// Reconnection state
 let pendingIdentify: DiscordUser | null = null
+let lastIdentity: DiscordUser | null = null
+let lastCampaignId: string | null = null
+let reconnectAttempts = 0
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+let shouldReconnect = false // Track if we should auto-reconnect
+const MAX_RECONNECT_ATTEMPTS = 10
+const BASE_RECONNECT_DELAY = 1000 // 1 second
 
 type MessageHandler = (message: ServerMessage) => void
 const messageHandlers: Set<MessageHandler> = new Set()
@@ -43,6 +54,7 @@ function handleMessage(event: MessageEvent): void {
       currentCampaignId.value = message.campaignId
       playbackState.value = message.playback
       users.value = message.users
+      miniAppState.value = message.miniApps
       break
     case 'playback-state':
       playbackState.value = message.playback
@@ -75,6 +87,21 @@ function handleMessage(event: MessageEvent): void {
     case 'error':
       error.value = message.message
       break
+    case 'miniapp-state':
+      miniAppState.value = message.miniApps
+      break
+    case 'miniapp-updated':
+      miniAppState.value = {
+        ...miniAppState.value,
+        appStates: {
+          ...miniAppState.value.appStates,
+          [message.appId]: message.state,
+        },
+      }
+      break
+    case 'reload':
+      window.location.reload()
+      break
   }
 
   for (const handler of messageHandlers) {
@@ -83,18 +110,47 @@ function handleMessage(event: MessageEvent): void {
 }
 
 export function useWebSocket() {
-  function connect(): void {
-    if (ws.value) return
+  function scheduleReconnect(): void {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      error.value = 'Connection lost. Please refresh the page.'
+      reconnecting.value = false
+      return
+    }
+
+    reconnecting.value = true
+    const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000)
+    reconnectAttempts++
+
+    reconnectTimeout = setTimeout(() => {
+      reconnectTimeout = null
+      doConnect()
+    }, delay)
+  }
+
+  function doConnect(): void {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) return
 
     const socket = new WebSocket(getWsUrl())
 
     socket.onopen = () => {
       connected.value = true
+      reconnecting.value = false
+      reconnectAttempts = 0
       error.value = null
-      // If we have a pending identity, send it now
-      if (pendingIdentify) {
+      shouldReconnect = true
+
+      // Re-identify if we had an identity before
+      if (lastIdentity) {
+        send({ type: 'identify', user: lastIdentity })
+        identified.value = true
+        // Re-join campaign if we were in one
+        if (lastCampaignId) {
+          send({ type: 'join-campaign', campaignId: lastCampaignId })
+        }
+      } else if (pendingIdentify) {
         send({ type: 'identify', user: pendingIdentify })
         identified.value = true
+        lastIdentity = pendingIdentify
         pendingIdentify = null
       }
     }
@@ -103,8 +159,12 @@ export function useWebSocket() {
       connected.value = false
       identified.value = false
       ws.value = null
-      currentCampaignId.value = null
       users.value = []
+
+      // Schedule reconnect if we were previously connected
+      if (shouldReconnect) {
+        scheduleReconnect()
+      }
     }
 
     socket.onerror = () => {
@@ -116,7 +176,23 @@ export function useWebSocket() {
     ws.value = socket
   }
 
+  function connect(): void {
+    if (ws.value) return
+    doConnect()
+  }
+
   function disconnect(): void {
+    // Clear reconnection state to prevent auto-reconnect
+    shouldReconnect = false
+    lastIdentity = null
+    lastCampaignId = null
+    reconnectAttempts = 0
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout)
+      reconnectTimeout = null
+    }
+    reconnecting.value = false
+
     if (ws.value) {
       ws.value.close()
       ws.value = null
@@ -124,6 +200,7 @@ export function useWebSocket() {
   }
 
   function identify(user: DiscordUser): void {
+    lastIdentity = user
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       send({ type: 'identify', user })
       identified.value = true
@@ -134,10 +211,12 @@ export function useWebSocket() {
   }
 
   function joinCampaign(campaignId: string): void {
+    lastCampaignId = campaignId
     send({ type: 'join-campaign', campaignId })
   }
 
   function leaveCampaign(): void {
+    lastCampaignId = null
     send({ type: 'leave-campaign' })
     currentCampaignId.value = null
     users.value = []
@@ -191,6 +270,22 @@ export function useWebSocket() {
     send({ type: 'queue-jump', assetId })
   }
 
+  function enableMiniApp(appId: string): void {
+    send({ type: 'miniapp-enable', appId })
+  }
+
+  function disableMiniApp(appId: string): void {
+    send({ type: 'miniapp-disable', appId })
+  }
+
+  function dispatchMiniAppAction(appId: string, action: string, payload?: unknown): void {
+    send({ type: 'miniapp-action', appId, action, payload })
+  }
+
+  function reloadPlayers(): void {
+    send({ type: 'reload-players' })
+  }
+
   function onMessage(handler: MessageHandler): () => void {
     messageHandlers.add(handler)
     return () => messageHandlers.delete(handler)
@@ -199,10 +294,12 @@ export function useWebSocket() {
   return {
     connected,
     identified,
+    reconnecting,
     currentCampaignId,
     playbackState,
     users,
     error,
+    miniAppState,
     connect,
     disconnect,
     identify,
@@ -220,6 +317,10 @@ export function useWebSocket() {
     setShuffle,
     queueAsset,
     jumpToAsset,
+    enableMiniApp,
+    disableMiniApp,
+    dispatchMiniAppAction,
+    reloadPlayers,
     onMessage,
   }
 }

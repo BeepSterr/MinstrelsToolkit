@@ -60,9 +60,13 @@ export type ClientMessage =
   | { type: 'playlist-settings'; loop?: boolean; shuffle?: boolean }
   | { type: 'queue-asset'; assetId: string }
   | { type: 'queue-jump'; assetId: string }
+  | { type: 'miniapp-enable'; appId: string }
+  | { type: 'miniapp-disable'; appId: string }
+  | { type: 'miniapp-action'; appId: string; action: string; payload?: unknown }
+  | { type: 'reload-players' }
 
 export type ServerMessage =
-  | { type: 'campaign-joined'; campaignId: string; playback: PlaybackState; users: DiscordUser[] }
+  | { type: 'campaign-joined'; campaignId: string; playback: PlaybackState; users: DiscordUser[]; miniApps: MiniAppState }
   | { type: 'playback-state'; playback: PlaybackState }
   | { type: 'queue-updated'; playback: PlaybackState }
   | { type: 'asset-selected'; assetId: string | null }
@@ -71,6 +75,9 @@ export type ServerMessage =
   | { type: 'user-joined'; user: DiscordUser }
   | { type: 'user-left'; userId: string }
   | { type: 'error'; message: string }
+  | { type: 'miniapp-state'; miniApps: MiniAppState }
+  | { type: 'miniapp-updated'; appId: string; state: unknown }
+  | { type: 'reload' }
 
 export interface CachedAsset {
   id: string
@@ -78,4 +85,9 @@ export interface CachedAsset {
   blob: Blob
   size: number
   cachedAt: number
+}
+
+export interface MiniAppState {
+  enabledApps: string[]
+  appStates: Record<string, unknown>
 }

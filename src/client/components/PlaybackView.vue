@@ -5,6 +5,8 @@ import AssetList from './AssetList.vue'
 import AssetUploader from './AssetUploader.vue'
 import PlaylistPanel from './PlaylistPanel.vue'
 import PlaylistEditor from './PlaylistEditor.vue'
+import MiniAppsPanel from './MiniAppsPanel.vue'
+import MiniAppsContainer from './MiniAppsContainer.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePlayback } from '../composables/usePlayback'
 
@@ -19,19 +21,24 @@ const emit = defineEmits<{
 
 const {
   connected,
+  reconnecting,
   users,
   playbackState: wsPlaybackState,
+  miniAppState,
   joinCampaign,
   leaveCampaign,
   onMessage,
   next,
   prev,
+  reloadPlayers,
 } = useWebSocket()
+
+const hasEnabledApps = computed(() => miniAppState.value.enabledApps.length > 0)
 
 const assetListRef = ref<InstanceType<typeof AssetList> | null>(null)
 const playlistPanelRef = ref<InstanceType<typeof PlaylistPanel> | null>(null)
 
-type SidebarView = 'assets' | 'upload' | 'playlists' | 'playlist-edit'
+type SidebarView = 'assets' | 'upload' | 'playlists' | 'playlist-edit' | 'apps'
 const sidebarView = ref<SidebarView>('assets')
 const editingPlaylist = ref<Playlist | undefined>(undefined)
 
@@ -185,8 +192,8 @@ onUnmounted(() => {
       <button @click="emit('back')" class="btn-back">← Back</button>
       <h2>{{ campaignName }}</h2>
       <div class="status">
-        <span :class="['connection', { connected }]">
-          {{ connected ? 'Connected' : 'Connecting...' }}
+        <span :class="['connection', { connected, reconnecting }]">
+          {{ connected ? 'Connected' : reconnecting ? 'Reconnecting...' : 'Connecting...' }}
         </span>
         <div class="user-avatars" v-if="users.length > 0">
           <div
@@ -206,6 +213,9 @@ onUnmounted(() => {
           </div>
         </div>
         <span v-else class="users">No users</span>
+        <button @click="reloadPlayers" class="btn-reload" title="Reload player views">
+          Reload Players
+        </button>
       </div>
     </header>
 
@@ -266,6 +276,11 @@ onUnmounted(() => {
             </div>
           </div>
         </template>
+
+        <!-- Mini Apps Section -->
+        <div v-if="hasEnabledApps" class="apps-section">
+          <MiniAppsContainer :campaign-id="campaignId" :is-g-m="true" />
+        </div>
       </main>
 
       <aside class="sidebar">
@@ -278,6 +293,10 @@ onUnmounted(() => {
             :class="['tab', { active: sidebarView === 'playlists' || sidebarView === 'playlist-edit' }]"
             @click="sidebarView = 'playlists'"
           >Playlists</button>
+          <button
+            :class="['tab', { active: sidebarView === 'apps' }]"
+            @click="sidebarView = 'apps'"
+          >Apps</button>
         </div>
 
         <div class="sidebar-content">
@@ -315,6 +334,11 @@ onUnmounted(() => {
               @create="handleCreatePlaylist"
             />
           </template>
+
+          <MiniAppsPanel
+            v-else-if="sidebarView === 'apps'"
+            :campaign-id="campaignId"
+          />
         </div>
       </aside>
     </div>
@@ -370,8 +394,27 @@ onUnmounted(() => {
   color: #3ba55c;
 }
 
+.connection.reconnecting {
+  color: #faa61a;
+}
+
 .users {
   color: #72767d;
+}
+
+.btn-reload {
+  background: #40444b;
+  color: #dcddde;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.btn-reload:hover {
+  background: #5865f2;
+  color: white;
 }
 
 .user-avatars {
@@ -423,6 +466,15 @@ onUnmounted(() => {
   justify-content: center;
   padding: 2rem;
   overflow: hidden;
+  gap: 1rem;
+}
+
+.apps-section {
+  width: 100%;
+  max-width: 600px;
+  border-top: 1px solid #40444b;
+  padding-top: 1rem;
+  margin-top: 1rem;
 }
 
 .loading,
