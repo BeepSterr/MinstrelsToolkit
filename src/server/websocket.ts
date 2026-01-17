@@ -503,6 +503,13 @@ const defaultAppStates: Record<string, unknown> = {
     timeLimit: 15,
     startTime: 0,
   },
+  'blackjack': {
+    phase: 'idle',
+    players: [],
+    dealer: { hand: [], hidden: true },
+    currentPlayerIndex: 0,
+    deck: [],
+  },
 }
 
 function handleMiniAppEnable(
@@ -604,6 +611,8 @@ function handleMiniAppAction(
     newState = reduceDiceRoller(currentState, action, payload, user)
   } else if (appId === 'quiz') {
     newState = reduceQuiz(currentState, action, payload, user)
+  } else if (appId === 'blackjack') {
+    newState = reduceBlackjack(currentState, action, payload, user)
   }
 
   room.miniApps.appStates[appId] = newState
@@ -771,6 +780,324 @@ function reduceQuiz(
         startTime: 0,
       }
     }
+    default:
+      return s
+  }
+}
+
+// Blackjack types
+interface BlackjackCard {
+  suit: 'hearts' | 'diamonds' | 'clubs' | 'spades'
+  rank: string
+  value: number
+}
+
+interface BlackjackPlayer {
+  oderId: string
+  username: string
+  hand: BlackjackCard[]
+  status: 'playing' | 'stand' | 'bust' | 'blackjack'
+}
+
+interface BlackjackState {
+  phase: 'idle' | 'joining' | 'playing' | 'dealer' | 'results'
+  players: BlackjackPlayer[]
+  dealer: {
+    hand: BlackjackCard[]
+    hidden: boolean
+  }
+  currentPlayerIndex: number
+  deck: BlackjackCard[]
+}
+
+function createDeck(): BlackjackCard[] {
+  const suits: Array<'hearts' | 'diamonds' | 'clubs' | 'spades'> = ['hearts', 'diamonds', 'clubs', 'spades']
+  const ranks = [
+    { rank: 'A', value: 11 },
+    { rank: '2', value: 2 },
+    { rank: '3', value: 3 },
+    { rank: '4', value: 4 },
+    { rank: '5', value: 5 },
+    { rank: '6', value: 6 },
+    { rank: '7', value: 7 },
+    { rank: '8', value: 8 },
+    { rank: '9', value: 9 },
+    { rank: '10', value: 10 },
+    { rank: 'J', value: 10 },
+    { rank: 'Q', value: 10 },
+    { rank: 'K', value: 10 },
+  ]
+
+  const deck: BlackjackCard[] = []
+  for (const suit of suits) {
+    for (const { rank, value } of ranks) {
+      deck.push({ suit, rank, value })
+    }
+  }
+  return deck
+}
+
+function shuffleDeck(deck: BlackjackCard[]): BlackjackCard[] {
+  const shuffled = [...deck]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled
+}
+
+function calculateBlackjackHandValue(hand: BlackjackCard[]): number {
+  let value = 0
+  let aces = 0
+
+  for (const card of hand) {
+    if (card.rank === 'A') {
+      aces++
+      value += 11
+    } else {
+      value += card.value
+    }
+  }
+
+  while (value > 21 && aces > 0) {
+    value -= 10
+    aces--
+  }
+
+  return value
+}
+
+function drawBlackjackCard(deck: BlackjackCard[]): { card: BlackjackCard; deck: BlackjackCard[] } {
+  const newDeck = [...deck]
+  const card = newDeck.pop()!
+  return { card, deck: newDeck }
+}
+
+// Reducer for blackjack app
+function reduceBlackjack(
+  state: unknown,
+  action: string,
+  payload?: unknown,
+  user?: DiscordUser | null
+): unknown {
+  const s = state as BlackjackState
+
+  switch (action) {
+    case 'start-round': {
+      const deck = shuffleDeck(createDeck())
+      return {
+        ...s,
+        phase: 'joining',
+        players: [],
+        dealer: { hand: [], hidden: true },
+        currentPlayerIndex: 0,
+        deck,
+      }
+    }
+
+    case 'join': {
+      if (s.phase !== 'joining' || !user) return s
+      // Already joined?
+      if (s.players.some(p => p.oderId === user.id)) return s
+      const newPlayer: BlackjackPlayer = {
+        oderId: user.id,
+        username: user.username,
+        hand: [],
+        status: 'playing',
+      }
+      return {
+        ...s,
+        players: [...s.players, newPlayer],
+      }
+    }
+
+    case 'deal': {
+      if (s.phase !== 'joining' || s.players.length === 0) return s
+
+      let deck = [...s.deck]
+      const players: BlackjackPlayer[] = s.players.map(p => ({ ...p, hand: [], status: 'playing' }))
+      const dealer = { hand: [] as BlackjackCard[], hidden: true }
+
+      // Deal 2 cards to each player and dealer
+      for (let round = 0; round < 2; round++) {
+        for (const player of players) {
+          const draw = drawBlackjackCard(deck)
+          player.hand.push(draw.card)
+          deck = draw.deck
+        }
+        const dealerDraw = drawBlackjackCard(deck)
+        dealer.hand.push(dealerDraw.card)
+        deck = dealerDraw.deck
+      }
+
+      // Check for blackjacks
+      for (const player of players) {
+        if (calculateBlackjackHandValue(player.hand) === 21) {
+          player.status = 'blackjack'
+        }
+      }
+
+      // Find first active player
+      let currentPlayerIndex = 0
+      while (currentPlayerIndex < players.length && players[currentPlayerIndex].status !== 'playing') {
+        currentPlayerIndex++
+      }
+
+      // If all players have blackjack, dealer plays and go to results
+      const allDone = players.every(p => p.status !== 'playing')
+
+      if (allDone) {
+        // Dealer plays
+        let dealerHand = [...dealer.hand]
+        let dealerDeck = deck
+
+        while (calculateBlackjackHandValue(dealerHand) < 17) {
+          const dealerDraw = drawBlackjackCard(dealerDeck)
+          dealerHand.push(dealerDraw.card)
+          dealerDeck = dealerDraw.deck
+        }
+
+        return {
+          ...s,
+          phase: 'results',
+          players,
+          dealer: { hand: dealerHand, hidden: false },
+          deck: dealerDeck,
+          currentPlayerIndex,
+        }
+      }
+
+      return {
+        ...s,
+        phase: 'playing',
+        players,
+        dealer,
+        deck,
+        currentPlayerIndex,
+      }
+    }
+
+    case 'hit': {
+      if (s.phase !== 'playing' || !user) return s
+      const currentPlayer = s.players[s.currentPlayerIndex]
+      if (!currentPlayer || currentPlayer.oderId !== user.id) return s
+      if (currentPlayer.status !== 'playing') return s
+
+      const draw = drawBlackjackCard(s.deck)
+      const newHand = [...currentPlayer.hand, draw.card]
+      const value = calculateBlackjackHandValue(newHand)
+
+      let newStatus: BlackjackPlayer['status'] = 'playing'
+      if (value > 21) newStatus = 'bust'
+      else if (value === 21) newStatus = 'stand'
+
+      const players = s.players.map((p, i) =>
+        i === s.currentPlayerIndex
+          ? { ...p, hand: newHand, status: newStatus }
+          : p
+      )
+
+      // If bust or 21, move to next player
+      let currentPlayerIndex = s.currentPlayerIndex
+      if (newStatus !== 'playing') {
+        currentPlayerIndex++
+        while (currentPlayerIndex < players.length && players[currentPlayerIndex].status !== 'playing') {
+          currentPlayerIndex++
+        }
+      }
+
+      // Check if all players done
+      const allDone = players.every(p => p.status !== 'playing')
+
+      if (allDone) {
+        // Dealer plays
+        let dealerHand = [...s.dealer.hand]
+        let dealerDeck = draw.deck
+
+        while (calculateBlackjackHandValue(dealerHand) < 17) {
+          const dealerDraw = drawBlackjackCard(dealerDeck)
+          dealerHand.push(dealerDraw.card)
+          dealerDeck = dealerDraw.deck
+        }
+
+        return {
+          ...s,
+          phase: 'results',
+          players,
+          dealer: { hand: dealerHand, hidden: false },
+          deck: dealerDeck,
+          currentPlayerIndex,
+        }
+      }
+
+      return {
+        ...s,
+        players,
+        deck: draw.deck,
+        currentPlayerIndex,
+      }
+    }
+
+    case 'stand': {
+      if (s.phase !== 'playing' || !user) return s
+      const currentPlayer = s.players[s.currentPlayerIndex]
+      if (!currentPlayer || currentPlayer.oderId !== user.id) return s
+      if (currentPlayer.status !== 'playing') return s
+
+      const players = s.players.map((p, i) =>
+        i === s.currentPlayerIndex
+          ? { ...p, status: 'stand' as const }
+          : p
+      )
+
+      // Move to next player
+      let currentPlayerIndex = s.currentPlayerIndex + 1
+      while (currentPlayerIndex < players.length && players[currentPlayerIndex].status !== 'playing') {
+        currentPlayerIndex++
+      }
+
+      // Check if all players done
+      const allDone = players.every(p => p.status !== 'playing')
+
+      if (allDone) {
+        // Dealer plays
+        let dealerHand = [...s.dealer.hand]
+        let dealerDeck = [...s.deck]
+
+        while (calculateBlackjackHandValue(dealerHand) < 17) {
+          const dealerDraw = drawBlackjackCard(dealerDeck)
+          dealerHand.push(dealerDraw.card)
+          dealerDeck = dealerDraw.deck
+        }
+
+        return {
+          ...s,
+          phase: 'results',
+          players,
+          dealer: { hand: dealerHand, hidden: false },
+          deck: dealerDeck,
+          currentPlayerIndex,
+        }
+      }
+
+      return {
+        ...s,
+        players,
+        currentPlayerIndex,
+      }
+    }
+
+    case 'reset': {
+      return {
+        ...s,
+        phase: 'idle',
+        players: [],
+        dealer: { hand: [], hidden: true },
+        currentPlayerIndex: 0,
+        deck: [],
+      }
+    }
+
     default:
       return s
   }

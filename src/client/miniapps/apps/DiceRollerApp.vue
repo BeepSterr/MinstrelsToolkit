@@ -153,11 +153,6 @@ function getRollClass(dice: string, result: number): string {
     </template>
 
     <!-- Player view - just shows they're waiting -->
-    <div v-else class="player-notice">
-      <span class="notice-icon">🎲</span>
-      <span class="notice-text">The GM controls the dice</span>
-    </div>
-
     <div class="history">
       <div class="history-header">
         <h4>Dice Bank</h4>
