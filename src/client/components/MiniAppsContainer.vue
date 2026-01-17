@@ -8,7 +8,7 @@ defineProps<{
   isGM?: boolean
 }>()
 
-const { miniAppState } = useWebSocket()
+const { miniAppState, currentUser } = useWebSocket()
 
 const enabledApps = computed(() => {
   return miniAppState.value.enabledApps
@@ -31,6 +31,7 @@ const hasEnabledApps = computed(() => enabledApps.value.length > 0)
           :is="app.component"
           :campaign-id="campaignId"
           :is-g-m="isGM"
+          :current-user="currentUser ? { oderId: currentUser.id, username: currentUser.username } : undefined"
         />
       </div>
     </template>

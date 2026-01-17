@@ -351,4 +351,11 @@ onUnmounted(() => {
   cursor: pointer;
   border: none;
 }
+
+/* Hide header when viewport is very small (e.g., Discord activity resized small) */
+@media (max-height: 300px) {
+  .header {
+    display: none;
+  }
+}
 </style>

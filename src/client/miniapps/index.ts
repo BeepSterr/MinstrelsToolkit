@@ -2,6 +2,7 @@ import { registerMiniApp } from './registry'
 import MediaDisplayApp from './apps/MediaDisplayApp.vue'
 import MediaDisplayControls from './apps/MediaDisplayControls.vue'
 import DiceRollerApp from './apps/DiceRollerApp.vue'
+import QuizApp from './apps/QuizApp.vue'
 
 // Register built-in apps
 registerMiniApp({
@@ -84,6 +85,96 @@ registerMiniApp({
       }
       case 'clear':
         return { ...s, history: [] }
+      default:
+        return s
+    }
+  },
+})
+
+interface PlayerAnswer {
+  oderId: string
+  username: string
+  answerIndex: number
+  timestamp: number
+}
+
+interface QuizState {
+  phase: 'idle' | 'question' | 'results'
+  question: string
+  options: string[]
+  correctIndex: number
+  answers: PlayerAnswer[]
+  timeLimit: number
+  startTime: number
+}
+
+registerMiniApp({
+  id: 'quiz',
+  name: 'Quiz',
+  description: 'Kahoot-style trivia questions for players',
+  icon: '?',
+  defaultState: {
+    phase: 'idle',
+    question: '',
+    options: [],
+    correctIndex: 0,
+    answers: [],
+    timeLimit: 15,
+    startTime: 0,
+  } as QuizState,
+  playerInteractive: true,
+  component: QuizApp,
+  reducer: (state, action, payload, user) => {
+    const s = state as QuizState
+    switch (action) {
+      case 'start-question': {
+        const p = payload as { question: string; options: string[]; correctIndex: number; timeLimit: number } | undefined
+        if (!p) return s
+        return {
+          ...s,
+          phase: 'question',
+          question: p.question,
+          options: p.options,
+          correctIndex: p.correctIndex,
+          timeLimit: p.timeLimit,
+          startTime: Date.now(),
+          answers: [],
+        }
+      }
+      case 'submit-answer': {
+        const p = payload as { answerIndex: number } | undefined
+        if (!p || !user || s.phase !== 'question') return s
+        // Check if user already answered
+        if (s.answers.some(a => a.oderId === user.id)) return s
+        const answer: PlayerAnswer = {
+          oderId: user.id,
+          username: user.username,
+          answerIndex: p.answerIndex,
+          timestamp: Date.now(),
+        }
+        return {
+          ...s,
+          answers: [...s.answers, answer],
+        }
+      }
+      case 'reveal-results': {
+        if (s.phase !== 'question') return s
+        return {
+          ...s,
+          phase: 'results',
+        }
+      }
+      case 'reset': {
+        return {
+          ...s,
+          phase: 'idle',
+          question: '',
+          options: [],
+          correctIndex: 0,
+          answers: [],
+          startTime: 0,
+        }
+      }
       default:
         return s
     }

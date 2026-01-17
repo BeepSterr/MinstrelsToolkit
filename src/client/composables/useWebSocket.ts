@@ -21,6 +21,7 @@ const playbackState = ref<PlaybackState>({
 const users = ref<DiscordUser[]>([])
 const error = ref<string | null>(null)
 const miniAppState = ref<MiniAppState>({ enabledApps: [], appStates: {} })
+const currentUser = ref<DiscordUser | null>(null)
 
 // Reconnection state
 let pendingIdentify: DiscordUser | null = null
@@ -201,6 +202,7 @@ export function useWebSocket() {
 
   function identify(user: DiscordUser): void {
     lastIdentity = user
+    currentUser.value = user
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       send({ type: 'identify', user })
       identified.value = true
@@ -300,6 +302,7 @@ export function useWebSocket() {
     users,
     error,
     miniAppState,
+    currentUser,
     connect,
     disconnect,
     identify,

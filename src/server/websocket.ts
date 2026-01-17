@@ -494,6 +494,15 @@ function handleQueueJump(
 const defaultAppStates: Record<string, unknown> = {
   'media-display': { assetId: null },
   'dice-roller': { history: [] },
+  'quiz': {
+    phase: 'idle',
+    question: '',
+    options: [],
+    correctIndex: 0,
+    answers: [],
+    timeLimit: 15,
+    startTime: 0,
+  },
 }
 
 function handleMiniAppEnable(
@@ -593,6 +602,8 @@ function handleMiniAppAction(
     newState = reduceMediaDisplay(currentState, action, payload)
   } else if (appId === 'dice-roller') {
     newState = reduceDiceRoller(currentState, action, payload, user)
+  } else if (appId === 'quiz') {
+    newState = reduceQuiz(currentState, action, payload, user)
   }
 
   room.miniApps.appStates[appId] = newState
@@ -680,6 +691,86 @@ function reduceDiceRoller(
     }
     case 'clear':
       return { ...s, history: [] }
+    default:
+      return s
+  }
+}
+
+interface QuizAnswer {
+  oderId: string
+  username: string
+  answerIndex: number
+  timestamp: number
+}
+
+interface QuizState {
+  phase: 'idle' | 'question' | 'results'
+  question: string
+  options: string[]
+  correctIndex: number
+  answers: QuizAnswer[]
+  timeLimit: number
+  startTime: number
+}
+
+// Reducer for quiz app
+function reduceQuiz(
+  state: unknown,
+  action: string,
+  payload?: unknown,
+  user?: DiscordUser | null
+): unknown {
+  const s = state as QuizState
+
+  switch (action) {
+    case 'start-question': {
+      const p = payload as { question: string; options: string[]; correctIndex: number; timeLimit: number } | undefined
+      if (!p) return s
+      return {
+        ...s,
+        phase: 'question',
+        question: p.question,
+        options: p.options,
+        correctIndex: p.correctIndex,
+        timeLimit: p.timeLimit,
+        startTime: Date.now(),
+        answers: [],
+      }
+    }
+    case 'submit-answer': {
+      const p = payload as { answerIndex: number } | undefined
+      if (!p || !user || s.phase !== 'question') return s
+      // Check if user already answered
+      if (s.answers.some(a => a.oderId === user.id)) return s
+      const answer: QuizAnswer = {
+        oderId: user.id,
+        username: user.username,
+        answerIndex: p.answerIndex,
+        timestamp: Date.now(),
+      }
+      return {
+        ...s,
+        answers: [...s.answers, answer],
+      }
+    }
+    case 'reveal-results': {
+      if (s.phase !== 'question') return s
+      return {
+        ...s,
+        phase: 'results',
+      }
+    }
+    case 'reset': {
+      return {
+        ...s,
+        phase: 'idle',
+        question: '',
+        options: [],
+        correctIndex: 0,
+        answers: [],
+        startTime: 0,
+      }
+    }
     default:
       return s
   }
