@@ -91,6 +91,11 @@ const animatedLayerVolumes = ref<Record<string, number>>({})
 let fadeAnimationFrame: number | null = null
 const FADE_SPEED = 1 // Units per second (0 to 1 takes 0.5 seconds)
 
+// Track the layered audio element used for progress bar (to clean up listeners)
+let layeredProgressAudio: HTMLAudioElement | null = null
+let layeredTimeUpdateHandler: (() => void) | null = null
+let layeredMetadataHandler: (() => void) | null = null
+
 // Local volume control (not synced)
 const volume = ref(parseFloat(localStorage.getItem('bardbox-volume') ?? '1'))
 
@@ -249,6 +254,28 @@ function startFadeAnimation() {
   }
 }
 
+// Clean up layered progress tracking listeners
+function cleanupLayeredProgressListeners() {
+  if (layeredProgressAudio) {
+    if (layeredTimeUpdateHandler) {
+      layeredProgressAudio.removeEventListener('timeupdate', layeredTimeUpdateHandler)
+    }
+    if (layeredMetadataHandler) {
+      layeredProgressAudio.removeEventListener('loadedmetadata', layeredMetadataHandler)
+    }
+    layeredProgressAudio = null
+    layeredTimeUpdateHandler = null
+    layeredMetadataHandler = null
+  }
+}
+
+// Pause all layered audio elements
+function pauseAllLayeredAudio() {
+  for (const audioEl of layeredAudioRefs.value.values()) {
+    audioEl.pause()
+  }
+}
+
 // Register a layered audio element
 function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
   if (el) {
@@ -259,15 +286,27 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
     syncLayeredPlayback()
 
     // Track time from first layered audio for the progress bar
-    if (layeredAudioRefs.value.size === 1) {
-      el.addEventListener('timeupdate', () => {
+    if (layeredAudioRefs.value.size === 1 && !layeredProgressAudio) {
+      layeredProgressAudio = el
+      layeredTimeUpdateHandler = () => {
         mediaCurrentTime.value = el.currentTime
-      })
-      el.addEventListener('loadedmetadata', () => {
+      }
+      layeredMetadataHandler = () => {
         mediaDuration.value = el.duration
-      })
+      }
+      el.addEventListener('timeupdate', layeredTimeUpdateHandler)
+      el.addEventListener('loadedmetadata', layeredMetadataHandler)
     }
   } else {
+    // Element is being unmounted - pause it first
+    const oldEl = layeredAudioRefs.value.get(assetId)
+    if (oldEl) {
+      oldEl.pause()
+      // Clean up progress listeners if this was the tracked element
+      if (oldEl === layeredProgressAudio) {
+        cleanupLayeredProgressListeners()
+      }
+    }
     layeredAudioRefs.value.delete(assetId)
   }
 }
@@ -275,11 +314,17 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
 // Watch for layered playlist changes
 watch(layeredAssetIds, async (ids, oldIds) => {
   if (ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(oldIds || [])) {
+    // Pause and clean up old layered audio before switching
+    pauseAllLayeredAudio()
+    cleanupLayeredProgressListeners()
     // Initialize animated volumes for new playlist
     const targetVolumes = wsPlaybackState.value.layerVolumes
     animatedLayerVolumes.value = { ...targetVolumes }
     await loadLayeredAssets(ids)
   } else if (ids.length === 0) {
+    // Pause and clean up all layered audio
+    pauseAllLayeredAudio()
+    cleanupLayeredProgressListeners()
     // Clear layered assets
     for (const url of layeredAssetUrls.value.values()) {
       revokeAssetUrl(url)
@@ -329,13 +374,6 @@ function togglePlayback() {
 function handleTimeUpdate(event: Event) {
   const el = event.target as HTMLMediaElement
   mediaCurrentTime.value = el.currentTime
-
-  if (!playbackState.value.playing) return
-
-  const drift = Math.abs(el.currentTime - playbackState.value.currentTime)
-  if (drift > 2) {
-    seek(el.currentTime)
-  }
 }
 
 function handleLoadedMetadata(event: Event) {
@@ -454,6 +492,9 @@ onUnmounted(() => {
   if (fadeAnimationFrame) {
     cancelAnimationFrame(fadeAnimationFrame)
   }
+  // Pause and clean up layered audio
+  pauseAllLayeredAudio()
+  cleanupLayeredProgressListeners()
   // Clean up layered asset URLs
   for (const url of layeredAssetUrls.value.values()) {
     revokeAssetUrl(url)
@@ -615,6 +656,7 @@ onUnmounted(() => {
       :playlist-length="playbackState.playlistLength"
       :is-layered="isLayeredPlaylist"
       :layered-track-count="layeredAssetIds.length"
+      :layers="layers"
       :shuffle="wsPlaybackState.shuffle"
       :loop="wsPlaybackState.loop"
       @play="play"
@@ -625,6 +667,7 @@ onUnmounted(() => {
       @update:volume="v => volume = v"
       @update:shuffle="setShuffle"
       @update:loop="setLoop"
+      @fade-to-layer="fadeToLayer"
     />
   </div>
 </template>

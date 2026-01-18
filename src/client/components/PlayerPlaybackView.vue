@@ -220,6 +220,13 @@ function startFadeAnimation() {
   }
 }
 
+// Pause all layered audio elements
+function pauseAllLayeredAudio() {
+  for (const audioEl of layeredAudioRefs.value.values()) {
+    audioEl.pause()
+  }
+}
+
 // Register a layered audio element
 function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
   if (el) {
@@ -228,6 +235,11 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
     el.volume = animatedVolume * volume.value
     syncLayeredPlayback()
   } else {
+    // Element is being unmounted - pause it first
+    const oldEl = layeredAudioRefs.value.get(assetId)
+    if (oldEl) {
+      oldEl.pause()
+    }
     layeredAudioRefs.value.delete(assetId)
   }
 }
@@ -235,10 +247,14 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
 // Watch for layered playlist changes
 watch(layeredAssetIds, async (ids, oldIds) => {
   if (ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(oldIds || [])) {
+    // Pause old layered audio before switching
+    pauseAllLayeredAudio()
     const targetVolumes = playbackState.value.layerVolumes
     animatedLayerVolumes.value = { ...targetVolumes }
     await loadLayeredAssets(ids)
   } else if (ids.length === 0) {
+    // Pause all layered audio before clearing
+    pauseAllLayeredAudio()
     for (const url of layeredAssetUrls.value.values()) {
       revokeAssetUrl(url)
     }
@@ -339,7 +355,8 @@ onUnmounted(() => {
   if (assetUrl.value) {
     revokeAssetUrl(assetUrl.value)
   }
-  // Clean up layered assets
+  // Pause and clean up layered audio
+  pauseAllLayeredAudio()
   for (const url of layeredAssetUrls.value.values()) {
     revokeAssetUrl(url)
   }
