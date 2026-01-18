@@ -50,9 +50,17 @@ function setLayerVolume(assetId: string, volume: number): void {
   layerVolumes.value[assetId] = volume
 }
 
+const searchQuery = ref('')
+
 const availableAssets = computed(() =>
   audioAssets.value.filter(a => !selectedAssetIds.value.includes(a.id))
 )
+
+const filteredAvailableAssets = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim()
+  if (!query) return availableAssets.value
+  return availableAssets.value.filter(a => a.name.toLowerCase().includes(query))
+})
 
 function addAsset(assetId: string) {
   if (!selectedAssetIds.value.includes(assetId)) {
@@ -209,9 +217,16 @@ async function handleSubmit() {
 
       <div class="available-section">
         <div class="available-header">Add Tracks</div>
-        <ul v-if="availableAssets.length > 0" class="available-list">
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Search tracks..."
+          class="search-input"
+          :disabled="saving || availableAssets.length === 0"
+        />
+        <ul v-if="filteredAvailableAssets.length > 0" class="available-list">
           <li
-            v-for="asset in availableAssets"
+            v-for="asset in filteredAvailableAssets"
             :key="asset.id"
             class="available-item"
             @click="addAsset(asset.id)"
@@ -222,7 +237,7 @@ async function handleSubmit() {
           </li>
         </ul>
         <div v-else class="empty-available">
-          {{ audioAssets.length === 0 ? 'No audio/video assets available' : 'All assets added' }}
+          {{ audioAssets.length === 0 ? 'No audio/video assets available' : availableAssets.length === 0 ? 'All assets added' : 'No matches found' }}
         </div>
       </div>
 
@@ -364,6 +379,10 @@ input:focus {
 
 .available-section {
   margin-bottom: 1rem;
+}
+
+.search-input {
+  margin-bottom: 0.5rem;
 }
 
 .available-item {

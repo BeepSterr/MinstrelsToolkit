@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Asset } from '../types'
 
 const props = defineProps<{
@@ -14,6 +14,13 @@ const emit = defineEmits<{
 
 const assets = ref<Asset[]>([])
 const loading = ref(true)
+const searchQuery = ref('')
+
+const filteredAssets = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim()
+  if (!query) return assets.value
+  return assets.value.filter(a => a.name.toLowerCase().includes(query))
+})
 
 async function fetchAssets() {
   loading.value = true
@@ -67,26 +74,40 @@ defineExpose({ refresh: fetchAssets, assets })
 
     <div v-if="loading" class="loading">Loading assets...</div>
 
-    <div v-else-if="assets.length === 0" class="empty">
-      No assets yet. Upload some to get started.
-    </div>
+    <template v-else>
+      <input
+        v-if="assets.length > 0"
+        v-model="searchQuery"
+        type="text"
+        placeholder="Search assets..."
+        class="search-input"
+      />
 
-    <ul v-else class="list">
-      <li
-        v-for="asset in assets"
-        :key="asset.id"
-        :class="['item', { selected: asset.id === selectedAssetId }]"
-      >
-        <div class="info" @click="emit('select', asset)">
-          <span class="icon">{{ getTypeIcon(asset.type) }}</span>
-          <div class="details">
-            <span class="name">{{ asset.name }}</span>
-            <span class="meta">{{ asset.type }} · {{ formatSize(asset.size) }}</span>
+      <div v-if="assets.length === 0" class="empty">
+        No assets yet. Upload some to get started.
+      </div>
+
+      <div v-else-if="filteredAssets.length === 0" class="empty">
+        No matches found
+      </div>
+
+      <ul v-else class="list">
+        <li
+          v-for="asset in filteredAssets"
+          :key="asset.id"
+          :class="['item', { selected: asset.id === selectedAssetId }]"
+        >
+          <div class="info" @click="emit('select', asset)">
+            <span class="icon">{{ getTypeIcon(asset.type) }}</span>
+            <div class="details">
+              <span class="name">{{ asset.name }}</span>
+              <span class="meta">{{ asset.type }} · {{ formatSize(asset.size) }}</span>
+            </div>
           </div>
-        </div>
-        <button @click.stop="deleteAsset(asset.id)" class="btn-delete">×</button>
-      </li>
-    </ul>
+          <button @click.stop="deleteAsset(asset.id)" class="btn-delete">×</button>
+        </li>
+      </ul>
+    </template>
   </div>
 </template>
 
@@ -121,6 +142,23 @@ defineExpose({ refresh: fetchAssets, assets })
 
 .btn-primary:hover {
   background: #4752c4;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem;
+  margin-bottom: 0.75rem;
+  background: #40444b;
+  border: 1px solid #40444b;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  border-color: #5865f2;
+  outline: none;
 }
 
 .loading,

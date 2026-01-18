@@ -7,6 +7,7 @@ import PlaylistPanel from './PlaylistPanel.vue'
 import PlaylistEditor from './PlaylistEditor.vue'
 import MiniAppsPanel from './MiniAppsPanel.vue'
 import MiniAppsContainer from './MiniAppsContainer.vue'
+import MusicBar from './MusicBar.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePlayback } from '../composables/usePlayback'
 import { useAssetCache } from '../composables/useAssetCache'
@@ -31,6 +32,9 @@ const {
   onMessage,
   next,
   prev,
+  setLoop,
+  setShuffle,
+  fadeToLayer,
   reloadPlayers,
 } = useWebSocket()
 
@@ -73,6 +77,10 @@ const {
 const audioRef = ref<HTMLAudioElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
 
+// Track media time for the music bar
+const mediaCurrentTime = ref(0)
+const mediaDuration = ref(0)
+
 // Layered playlist state
 const layeredAudioRefs = ref<Map<string, HTMLAudioElement>>(new Map())
 const layeredAssetUrls = ref<Map<string, string>>(new Map())
@@ -110,6 +118,16 @@ const layeredAssetIds = computed(() => {
 function getLayeredAsset(assetId: string): Asset | undefined {
   return assets.value.find(a => a.id === assetId)
 }
+
+// Layer info for the music bar
+const layers = computed(() => {
+  if (!isLayeredPlaylist.value) return []
+  return layeredAssetIds.value.map(id => ({
+    id,
+    name: getLayeredAsset(id)?.name ?? 'Unknown',
+    volume: animatedLayerVolumes.value[id] ?? wsPlaybackState.value.layerVolumes[id] ?? 0,
+  }))
+})
 
 // Load all assets for a layered playlist
 async function loadLayeredAssets(assetIds: string[]) {
@@ -239,6 +257,16 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
     const animatedVolume = animatedLayerVolumes.value[assetId] ?? wsPlaybackState.value.layerVolumes[assetId] ?? 0
     el.volume = animatedVolume * volume.value
     syncLayeredPlayback()
+
+    // Track time from first layered audio for the progress bar
+    if (layeredAudioRefs.value.size === 1) {
+      el.addEventListener('timeupdate', () => {
+        mediaCurrentTime.value = el.currentTime
+      })
+      el.addEventListener('loadedmetadata', () => {
+        mediaDuration.value = el.duration
+      })
+    }
   } else {
     layeredAudioRefs.value.delete(assetId)
   }
@@ -300,12 +328,34 @@ function togglePlayback() {
 
 function handleTimeUpdate(event: Event) {
   const el = event.target as HTMLMediaElement
+  mediaCurrentTime.value = el.currentTime
+
   if (!playbackState.value.playing) return
 
   const drift = Math.abs(el.currentTime - playbackState.value.currentTime)
   if (drift > 2) {
     seek(el.currentTime)
   }
+}
+
+function handleLoadedMetadata(event: Event) {
+  const el = event.target as HTMLMediaElement
+  mediaDuration.value = el.duration
+}
+
+function handleCanPlay(event: Event) {
+  const el = event.target as HTMLMediaElement
+  // When new track is ready to play, start it if playback state says we should be playing
+  if (playbackState.value.playing && el.paused) {
+    el.play().catch(() => {})
+  }
+}
+
+function handleSeekFromBar(time: number) {
+  seek(time)
+  // Also update the local media element
+  if (audioRef.value) audioRef.value.currentTime = time
+  if (videoRef.value) videoRef.value.currentTime = time
 }
 
 function handleTrackEnded() {
@@ -453,115 +503,45 @@ onUnmounted(() => {
 
     <div class="content">
       <main class="playback-area">
-        <div v-if="loading || layeredAssetsLoading" class="loading">Loading asset...</div>
-
-        <!-- Layered Playlist View -->
-        <template v-else-if="isLayeredPlaylist">
-          <div class="layered-view">
-            <div class="layered-header">
-              <span class="layered-icon">🎚️</span>
-              <span class="layered-title">Layered Playlist</span>
-              <span class="layered-count">{{ layeredAssetIds.length }} tracks</span>
-            </div>
-
-            <div class="layered-tracks">
-              <div
-                v-for="assetId in layeredAssetIds"
-                :key="assetId"
-                :class="['layered-track', { active: (animatedLayerVolumes[assetId] ?? 0) > 0.5 }]"
-              >
-                <span class="track-name">{{ getLayeredAsset(assetId)?.name || 'Unknown' }}</span>
-                <span class="track-volume">{{ Math.round((animatedLayerVolumes[assetId] ?? 0) * 100) }}%</span>
-              </div>
-            </div>
-
-            <!-- Hidden audio elements for each layer -->
-            <audio
-              v-for="assetId in layeredAssetIds"
-              :key="assetId"
-              :ref="(el) => registerLayeredAudio(assetId, el as HTMLAudioElement)"
-              :src="layeredAssetUrls.get(assetId)"
-              loop
-            ></audio>
-          </div>
-
-          <div class="controls">
-            <button @click="togglePlayback" class="btn-play">
-              {{ isPlaying ? '⏸️ Pause' : '▶️ Play' }}
-            </button>
-            <div class="volume-control">
-              <span class="volume-icon">{{ volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊' }}</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                v-model.number="volume"
-                class="volume-slider"
-              />
-            </div>
-          </div>
+        <!-- Hidden audio elements for layered playlist -->
+        <template v-if="isLayeredPlaylist">
+          <audio
+            v-for="assetId in layeredAssetIds"
+            :key="assetId"
+            :ref="(el) => registerLayeredAudio(assetId, el as HTMLAudioElement)"
+            :src="layeredAssetUrls.get(assetId)"
+            loop
+          ></audio>
         </template>
 
-        <!-- Regular Asset/Playlist View -->
-        <div v-else-if="!currentAsset" class="empty">
-          Select an asset or playlist to play
-        </div>
-
-        <template v-else>
-          <div v-if="currentAsset.type === 'image'" class="image-view">
+        <!-- Hidden audio/video elements for regular playback -->
+        <template v-else-if="currentAsset">
+          <audio
+            v-if="currentAsset.type === 'audio'"
+            ref="audioRef"
+            :src="assetUrl!"
+            @timeupdate="handleTimeUpdate"
+            @loadedmetadata="handleLoadedMetadata"
+            @canplay="handleCanPlay"
+            @ended="handleTrackEnded"
+          ></audio>
+          <video
+            v-else-if="currentAsset.type === 'video'"
+            ref="videoRef"
+            :src="assetUrl!"
+            @timeupdate="handleTimeUpdate"
+            @loadedmetadata="handleLoadedMetadata"
+            @canplay="handleCanPlay"
+            @ended="handleTrackEnded"
+            class="hidden-video"
+          ></video>
+          <div v-else-if="currentAsset.type === 'image'" class="image-view">
             <img :src="assetUrl!" :alt="currentAsset.name" />
-          </div>
-
-          <div v-else-if="currentAsset.type === 'audio'" class="audio-view">
-            <div class="audio-info">
-              <span class="audio-icon">🎵</span>
-              <span class="audio-name">{{ currentAsset.name }}</span>
-              <span v-if="hasPlaylist" class="playlist-indicator">
-                {{ playbackState.playlistIndex + 1 }} / {{ playbackState.playlistLength }}
-              </span>
-            </div>
-            <audio
-              ref="audioRef"
-              :src="assetUrl!"
-              @timeupdate="handleTimeUpdate"
-              @ended="handleTrackEnded"
-            ></audio>
-          </div>
-
-          <div v-else-if="currentAsset.type === 'video'" class="video-view">
-            <video
-              ref="videoRef"
-              :src="assetUrl!"
-              @timeupdate="handleTimeUpdate"
-              @ended="handleTrackEnded"
-            ></video>
-          </div>
-
-          <div v-if="currentAsset.type !== 'image'" class="controls">
-            <button v-if="hasPlaylist" @click="prev" class="btn-control">⏮</button>
-            <button @click="togglePlayback" class="btn-play">
-              {{ isPlaying ? '⏸️ Pause' : '▶️ Play' }}
-            </button>
-            <button v-if="hasPlaylist" @click="next" class="btn-control">⏭</button>
-            <div class="volume-control">
-              <span class="volume-icon">{{ volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊' }}</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                v-model.number="volume"
-                class="volume-slider"
-              />
-            </div>
           </div>
         </template>
 
         <!-- Mini Apps Section -->
-        <div v-if="hasEnabledApps" class="apps-section">
-          <MiniAppsContainer :campaign-id="campaignId" :is-g-m="true" />
-        </div>
+        <MiniAppsContainer v-if="hasEnabledApps" :campaign-id="campaignId" :is-g-m="true" />
       </main>
 
       <aside class="sidebar">
@@ -623,6 +603,29 @@ onUnmounted(() => {
         </div>
       </aside>
     </div>
+
+    <MusicBar
+      :current-asset="currentAsset"
+      :is-playing="isPlaying"
+      :current-time="mediaCurrentTime"
+      :duration="mediaDuration"
+      :volume="volume"
+      :has-playlist="hasPlaylist"
+      :playlist-index="playbackState.playlistIndex"
+      :playlist-length="playbackState.playlistLength"
+      :is-layered="isLayeredPlaylist"
+      :layered-track-count="layeredAssetIds.length"
+      :shuffle="wsPlaybackState.shuffle"
+      :loop="wsPlaybackState.loop"
+      @play="play"
+      @pause="pause"
+      @next="next"
+      @prev="prev"
+      @seek="handleSeekFromBar"
+      @update:volume="v => volume = v"
+      @update:shuffle="setShuffle"
+      @update:loop="setLoop"
+    />
   </div>
 </template>
 
@@ -776,19 +779,6 @@ onUnmounted(() => {
   gap: 1rem;
 }
 
-.apps-section {
-  width: 100%;
-  max-width: 600px;
-  border-top: 1px solid #40444b;
-  padding-top: 1rem;
-  margin-top: 1rem;
-}
-
-.loading,
-.empty {
-  color: #72767d;
-}
-
 .image-view {
   max-width: 100%;
   max-height: 100%;
@@ -804,117 +794,8 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
-.audio-view {
-  text-align: center;
-}
-
-.audio-info {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.audio-icon {
-  font-size: 4rem;
-}
-
-.audio-name {
-  font-size: 1.25rem;
-}
-
-.playlist-indicator {
-  color: #72767d;
-  font-size: 0.875rem;
-}
-
-.video-view {
-  max-width: 100%;
-  max-height: calc(100vh - 200px);
-}
-
-.video-view video {
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: 8px;
-}
-
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.btn-control {
-  background: #40444b;
-  color: white;
-  border: none;
-  padding: 0.75rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.btn-control:hover {
-  background: #5865f2;
-}
-
-.btn-play {
-  background: #5865f2;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.btn-play:hover {
-  background: #4752c4;
-}
-
-.volume-control {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-left: 1rem;
-  padding-left: 1rem;
-  border-left: 1px solid #40444b;
-}
-
-.volume-icon {
-  font-size: 1.25rem;
-}
-
-.volume-slider {
-  width: 100px;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #40444b;
-  border-radius: 2px;
-  cursor: pointer;
-}
-
-.volume-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  background: #5865f2;
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.volume-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  background: #5865f2;
-  border-radius: 50%;
-  cursor: pointer;
-  border: none;
+.hidden-video {
+  display: none;
 }
 
 .sidebar {
@@ -955,74 +836,5 @@ onUnmounted(() => {
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-}
-
-.layered-view {
-  text-align: center;
-}
-
-.layered-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.layered-icon {
-  font-size: 3rem;
-}
-
-.layered-title {
-  font-size: 1.25rem;
-  font-weight: 500;
-}
-
-.layered-count {
-  color: #72767d;
-  font-size: 0.875rem;
-}
-
-.layered-tracks {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 400px;
-  margin: 0 auto;
-}
-
-.layered-track {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  background: #40444b;
-  border-radius: 4px;
-  border-left: 3px solid transparent;
-  transition: all 0.2s ease;
-}
-
-.layered-track.active {
-  background: rgba(88, 101, 242, 0.2);
-  border-left-color: #5865f2;
-}
-
-.layered-track .track-name {
-  font-size: 0.875rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.layered-track .track-volume {
-  font-size: 0.75rem;
-  color: #72767d;
-  min-width: 40px;
-  text-align: right;
-}
-
-.layered-track.active .track-volume {
-  color: #5865f2;
-  font-weight: 500;
 }
 </style>
