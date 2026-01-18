@@ -132,7 +132,7 @@ const activeLayer = computed(() => {
 
       <!-- Progress Bar -->
       <span class="time">{{ formatTime(currentTime) }}</span>
-      <div class="progress-bar" @click="false && !isLayered && handleSeek($event)">
+      <div class="progress-bar" :class="{ 'interact': !isLayered}" @click="!isLayered && handleSeek($event)">
         <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
       </div>
       <span class="time">{{ formatTime(duration) }}</span>
@@ -307,11 +307,16 @@ const activeLayer = computed(() => {
   position: relative;
 }
 
-/*
-.progress-bar:hover {
+.progress-bar.interact {
+  background: #4f545c;
+  cursor: pointer;
+}
+
+
+.progress-bar.interact:hover  {
   height: 6px;
 }
-*/
+
 
 .progress-fill {
   height: 100%;

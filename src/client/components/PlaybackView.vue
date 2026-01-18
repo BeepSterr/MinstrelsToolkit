@@ -330,9 +330,13 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
 }
 
 // Watch for entering/leaving layered mode - pause regular audio when entering
+// Using flush: 'sync' to ensure this runs immediately when isLayeredPlaylist changes,
+// before any message handlers can call syncPlayback with the old media element
 watch(isLayeredPlaylist, (isLayered) => {
   if (isLayered) {
     console.log('[DEBUG] Entering layered mode, pausing regular audio/video')
+    // Clear the media element first to prevent syncPlayback from restarting it
+    setMediaElement(null)
     if (audioRef.value) {
       audioRef.value.pause()
       console.log('[DEBUG] Paused audioRef')
@@ -342,7 +346,7 @@ watch(isLayeredPlaylist, (isLayered) => {
       console.log('[DEBUG] Paused videoRef')
     }
   }
-})
+}, { flush: 'sync' })
 
 // Watch for layered playlist changes
 watch(layeredAssetIds, async (ids, oldIds) => {
