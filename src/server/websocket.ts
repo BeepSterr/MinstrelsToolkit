@@ -367,7 +367,7 @@ async function handlePlaylistPlay(
   pb.playlistLength = playlist.assetIds.length
   pb.nextAssetId = null
 
-  // Build order, shuffling if needed (only for sequential playlists)
+  // Build order, shuffling if needed (only for sequential playlists, not progressive)
   room.playlistOrder = pb.shuffle && pb.playlistType === 'sequential'
     ? shuffleArray(playlist.assetIds)
     : [...playlist.assetIds]
@@ -385,7 +385,8 @@ async function handlePlaylistPlay(
       pb.layerVolumes[playlist.assetIds[0]] = 1
     }
   } else {
-    // Sequential playlist: play one track at a time
+    // Sequential or Progressive playlist: play one track at a time
+    // Progressive differs in that tracks loop until manually advanced
     pb.playlistIndex = 0
     pb.assetId = room.playlistOrder[0]
     pb.layerVolumes = {}
@@ -1226,9 +1227,13 @@ export function broadcastPlaylistsUpdated(campaignId: string): void {
 }
 
 // Called when a track ends - advance to next in playlist
+// Note: For progressive playlists, tracks loop on the client so this won't be called
 export function handleTrackEnded(campaignId: string): void {
   const room = rooms.get(campaignId)
   if (!room || !room.playback.playlistId) return
+
+  // Progressive playlists don't auto-advance - they loop until manually advanced
+  if (room.playback.playlistType === 'progressive') return
 
   advancePlaylist(room, 1)
   broadcast(campaignId, { type: 'playback-state', playback: room.playback })

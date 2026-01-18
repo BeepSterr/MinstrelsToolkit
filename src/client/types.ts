@@ -21,7 +21,7 @@ export interface Playlist {
   id: string
   campaignId: string
   name: string
-  type: 'sequential' | 'layered'
+  type: 'sequential' | 'layered' | 'progressive'
   assetIds: string[]
   layerVolumes?: Record<string, number>  // For layered playlists: assetId -> default volume (0-1)
   createdAt: string
@@ -35,7 +35,7 @@ export interface PlaybackState {
   timestamp: number
   // Playlist info (for admin UI)
   playlistId: string | null
-  playlistType: 'sequential' | 'layered'
+  playlistType: 'sequential' | 'layered' | 'progressive'
   playlistIndex: number
   playlistLength: number
   loop: boolean

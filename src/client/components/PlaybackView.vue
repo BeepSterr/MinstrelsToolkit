@@ -40,6 +40,7 @@ const {
 
 const hasEnabledApps = computed(() => miniAppState.value.enabledApps.length > 0)
 const isLayeredPlaylist = computed(() => wsPlaybackState.value.playlistType === 'layered' && wsPlaybackState.value.playlistId !== null)
+const isProgressivePlaylist = computed(() => wsPlaybackState.value.playlistType === 'progressive' && wsPlaybackState.value.playlistId !== null)
 
 const { preCacheAllAssets, getAssetUrl, revokeAssetUrl } = useAssetCache()
 
@@ -99,6 +100,9 @@ let layeredMetadataHandler: (() => void) | null = null
 // Local volume control (not synced)
 const volume = ref(parseFloat(localStorage.getItem('bardbox-volume') ?? '1'))
 
+// Local loop control for single asset playback (not synced)
+const singleAssetLoop = ref(false)
+
 watch(volume, (v) => {
   localStorage.setItem('bardbox-volume', String(v))
   if (audioRef.value) audioRef.value.volume = v
@@ -112,6 +116,21 @@ watch([audioRef, videoRef], () => {
 
 const isPlaying = computed(() => playbackState.value.playing)
 const hasPlaylist = computed(() => playbackState.value.playlistId !== null)
+
+// Progressive playlist: pending next phase (queued to play after current loop)
+const pendingNextPhase = ref(false)
+// Track the last known time to detect loop reset
+let lastProgressiveTime = 0
+
+// Reset pending state when track or playlist changes
+watch(() => wsPlaybackState.value.assetId, () => {
+  pendingNextPhase.value = false
+  lastProgressiveTime = 0
+})
+watch(() => wsPlaybackState.value.playlistId, () => {
+  pendingNextPhase.value = false
+  lastProgressiveTime = 0
+})
 
 // Layered playlist asset IDs from the playback state
 const layeredAssetIds = computed(() => {
@@ -427,6 +446,22 @@ function handleTimeUpdate(event: Event) {
     return
   }
 
+  // Progressive playlist: detect loop reset and advance if pending
+  if (isProgressivePlaylist.value && pendingNextPhase.value) {
+    // Detect when audio loops (time jumps back significantly)
+    if (lastProgressiveTime > 1 && el.currentTime < 1) {
+      console.log('[DEBUG] Progressive playlist loop detected, advancing to next phase')
+      pendingNextPhase.value = false
+      lastProgressiveTime = 0
+      next()
+      return
+    }
+  }
+
+  if (isProgressivePlaylist.value) {
+    lastProgressiveTime = el.currentTime
+  }
+
   debugTime('regular', el.currentTime, {
     assetId: currentAsset.value?.id,
     paused: el.paused,
@@ -457,8 +492,16 @@ function handleSeekFromBar(time: number) {
 
 function handleTrackEnded() {
   // When a track ends and we're in playlist mode, advance to next
-  if (hasPlaylist.value) {
+  // Progressive playlists loop the current track, so don't auto-advance
+  if (hasPlaylist.value && !isProgressivePlaylist.value) {
     next()
+  }
+}
+
+// Queue the next phase for progressive playlists (will advance when current loop finishes)
+function queueNextPhase() {
+  if (isProgressivePlaylist.value) {
+    pendingNextPhase.value = true
   }
 }
 
@@ -620,6 +663,7 @@ onUnmounted(() => {
             v-if="currentAsset.type === 'audio'"
             ref="audioRef"
             :src="assetUrl!"
+            :loop="isProgressivePlaylist || (!hasPlaylist && singleAssetLoop)"
             @timeupdate="handleTimeUpdate"
             @loadedmetadata="handleLoadedMetadata"
             @canplay="handleCanPlay"
@@ -629,6 +673,7 @@ onUnmounted(() => {
             v-else-if="currentAsset.type === 'video'"
             ref="videoRef"
             :src="assetUrl!"
+            :loop="isProgressivePlaylist || (!hasPlaylist && singleAssetLoop)"
             @timeupdate="handleTimeUpdate"
             @loadedmetadata="handleLoadedMetadata"
             @canplay="handleCanPlay"
@@ -714,10 +759,13 @@ onUnmounted(() => {
       :playlist-index="playbackState.playlistIndex"
       :playlist-length="playbackState.playlistLength"
       :is-layered="isLayeredPlaylist"
+      :is-progressive="isProgressivePlaylist"
+      :pending-next-phase="pendingNextPhase"
       :layered-track-count="layeredAssetIds.length"
       :layers="layers"
       :shuffle="wsPlaybackState.shuffle"
       :loop="wsPlaybackState.loop"
+      :single-loop="singleAssetLoop"
       @play="play"
       @pause="pause"
       @next="next"
@@ -726,7 +774,9 @@ onUnmounted(() => {
       @update:volume="v => volume = v"
       @update:shuffle="setShuffle"
       @update:loop="setLoop"
+      @update:single-loop="v => singleAssetLoop = v"
       @fade-to-layer="fadeToLayer"
+      @queue-next-phase="queueNextPhase"
     />
   </div>
 </template>

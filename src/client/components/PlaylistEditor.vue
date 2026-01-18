@@ -14,7 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const name = ref(props.playlist?.name ?? '')
-const playlistType = ref<'sequential' | 'layered'>(props.playlist?.type ?? 'sequential')
+const playlistType = ref<'sequential' | 'layered' | 'progressive'>(props.playlist?.type ?? 'sequential')
 const selectedAssetIds = ref<string[]>(props.playlist?.assetIds ?? [])
 const layerVolumes = ref<Record<string, number>>(props.playlist?.layerVolumes ?? {})
 const saving = ref(false)
@@ -159,11 +159,21 @@ async function handleSubmit() {
           >
             Layered
           </button>
+          <button
+            type="button"
+            :class="['type-btn', { active: playlistType === 'progressive' }]"
+            @click="playlistType = 'progressive'"
+            :disabled="saving"
+          >
+            Progressive
+          </button>
         </div>
         <p class="type-hint">
           {{ playlistType === 'sequential'
             ? 'Plays tracks one after another'
-            : 'Plays all tracks simultaneously with adjustable volumes'
+            : playlistType === 'layered'
+            ? 'Plays all tracks simultaneously with adjustable volumes'
+            : 'Loops current track until manually advanced (for boss music)'
           }}
         </p>
       </div>
@@ -191,14 +201,14 @@ async function handleSubmit() {
             </div>
             <div class="track-controls">
               <button
-                v-if="playlistType === 'sequential'"
+                v-if="playlistType !== 'layered'"
                 type="button"
                 @click="moveAsset(index, -1)"
                 :disabled="index === 0"
                 class="btn-move"
               >↑</button>
               <button
-                v-if="playlistType === 'sequential'"
+                v-if="playlistType !== 'layered'"
                 type="button"
                 @click="moveAsset(index, 1)"
                 :disabled="index === selectedAssetIds.length - 1"

@@ -18,10 +18,13 @@ const props = defineProps<{
   playlistIndex: number
   playlistLength: number
   isLayered: boolean
+  isProgressive: boolean
+  pendingNextPhase: boolean
   layeredTrackCount?: number
   layers?: LayerInfo[]
   shuffle: boolean
   loop: boolean
+  singleLoop: boolean
 }>()
 
 const emit = defineEmits<{
@@ -33,7 +36,9 @@ const emit = defineEmits<{
   'update:volume': [volume: number]
   'update:shuffle': [shuffle: boolean]
   'update:loop': [loop: boolean]
+  'update:singleLoop': [singleLoop: boolean]
   'fade-to-layer': [assetId: string]
+  'queue-next-phase': []
 }>()
 
 const progress = computed(() => {
@@ -79,6 +84,9 @@ const trackSubtitle = computed(() => {
   if (props.isLayered && props.layeredTrackCount) {
     return `${props.layeredTrackCount} tracks playing`
   }
+  if (props.isProgressive) {
+    return `Phase ${props.playlistIndex + 1} of ${props.playlistLength}`
+  }
   if (props.hasPlaylist) {
     return `Track ${props.playlistIndex + 1} of ${props.playlistLength}`
   }
@@ -107,7 +115,7 @@ const activeLayer = computed(() => {
     <!-- Playback Controls -->
     <div class="playback-controls">
       <button
-        v-if="hasPlaylist && !isLayered"
+        v-if="hasPlaylist && !isLayered && !isProgressive"
         @click="emit('prev')"
         class="btn-control"
         :disabled="!hasTrack"
@@ -122,12 +130,22 @@ const activeLayer = computed(() => {
         {{ isPlaying ? '⏸' : '▶' }}
       </button>
       <button
-        v-if="hasPlaylist && !isLayered"
+        v-if="hasPlaylist && !isLayered && !isProgressive"
         @click="emit('next')"
         class="btn-control"
         :disabled="!hasTrack"
       >
         ⏭
+      </button>
+      <!-- Next Phase button for progressive playlists -->
+      <button
+        v-if="isProgressive"
+        @click="emit('queue-next-phase')"
+        :class="['btn-phase', { queued: pendingNextPhase }]"
+        :disabled="!hasTrack || pendingNextPhase"
+        :title="pendingNextPhase ? 'Next phase queued - will play after current loop' : 'Queue next phase (plays after current loop finishes)'"
+      >
+        {{ pendingNextPhase ? 'Queued...' : 'Next Phase ⏭' }}
       </button>
 
       <!-- Progress Bar -->
@@ -151,8 +169,8 @@ const activeLayer = computed(() => {
       </button>
     </div>
 
-    <!-- Playlist Controls -->
-    <div v-if="hasPlaylist && !isLayered" class="playlist-controls">
+    <!-- Playlist Controls (not shown for progressive - shuffle/loop don't apply) -->
+    <div v-if="hasPlaylist && !isLayered && !isProgressive" class="playlist-controls">
       <button
         @click="emit('update:loop', !loop)"
         :class="['btn-toggle', { active: loop }]"
@@ -166,6 +184,17 @@ const activeLayer = computed(() => {
           title="Shuffle"
       >
         🔀
+      </button>
+    </div>
+
+    <!-- Single asset loop control -->
+    <div v-if="!hasPlaylist && hasTrack" class="playlist-controls">
+      <button
+        @click="emit('update:singleLoop', !singleLoop)"
+        :class="['btn-toggle', { active: singleLoop }]"
+        title="Loop"
+      >
+        🔁
       </button>
     </div>
 
@@ -289,6 +318,39 @@ const activeLayer = computed(() => {
 .btn-play:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.btn-phase {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.btn-phase:hover:not(:disabled) {
+  background: #4752c4;
+}
+
+.btn-phase:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-phase.queued {
+  background: #3ba55c;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 
 .time {

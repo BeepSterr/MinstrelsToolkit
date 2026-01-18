@@ -13,14 +13,13 @@ const emit = defineEmits<{
   create: []
 }>()
 
-const { playbackState, playPlaylist, stopPlaylist, setLoop, setShuffle, queueAsset, jumpToAsset, next, prev, setLayerVolume, fadeToLayer } = useWebSocket()
+const { playbackState, playPlaylist, stopPlaylist, queueAsset, jumpToAsset, setLayerVolume, fadeToLayer } = useWebSocket()
 
 const playlists = ref<Playlist[]>([])
 const loading = ref(true)
 const expandedPlaylistId = ref<string | null>(null)
 const clickTimers = ref<Record<string, number>>({})
 
-const isPlaying = computed(() => playbackState.value.playlistId !== null)
 const currentPlaylistId = computed(() => playbackState.value.playlistId)
 const isLayeredPlaylist = computed(() => playbackState.value.playlistType === 'layered')
 
@@ -126,22 +125,6 @@ defineExpose({ refresh: fetchPlaylists })
     <div class="panel-header">
       <h3>Playlists</h3>
       <button @click="emit('create')" class="btn-add">+ New</button>
-    </div>
-
-    <div class="playback-controls" v-if="isPlaying">
-      <button @click="prev" class="btn-control" title="Previous">⏮</button>
-      <button @click="stopPlaylist" class="btn-control btn-stop" title="Stop">⏹</button>
-      <button @click="next" class="btn-control" title="Next">⏭</button>
-      <button
-        @click="setLoop(!playbackState.loop)"
-        :class="['btn-control', { active: playbackState.loop }]"
-        title="Loop"
-      >🔁</button>
-      <button
-        @click="setShuffle(!playbackState.shuffle)"
-        :class="['btn-control', { active: playbackState.shuffle }]"
-        title="Shuffle"
-      >🔀</button>
     </div>
 
     <div v-if="loading" class="loading">Loading...</div>
@@ -258,37 +241,6 @@ defineExpose({ refresh: fetchPlaylists })
 .btn-add:hover {
   background: #5865f2;
   color: white;
-}
-
-.playback-controls {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
-  padding: 0.5rem;
-  background: #202225;
-  border-radius: 4px;
-}
-
-.btn-control {
-  background: #40444b;
-  border: none;
-  color: #dcddde;
-  padding: 0.375rem 0.5rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-.btn-control:hover {
-  background: #5865f2;
-}
-
-.btn-control.active {
-  background: #5865f2;
-}
-
-.btn-control.btn-stop {
-  background: #ed4245;
 }
 
 .loading, .empty {
