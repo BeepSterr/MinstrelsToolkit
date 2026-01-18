@@ -20,11 +20,13 @@ function getDefaultPlaybackState(): PlaybackState {
     currentTime: 0,
     timestamp: Date.now(),
     playlistId: null,
+    playlistType: 'sequential',
     playlistIndex: -1,
     playlistLength: 0,
     loop: false,
     shuffle: false,
     nextAssetId: null,
+    layerVolumes: {},
   }
 }
 
@@ -145,6 +147,12 @@ export function handleMessage(
       break
     case 'queue-jump':
       handleQueueJump(ws, message.assetId)
+      break
+    case 'layer-volume':
+      handleLayerVolume(ws, message.assetId, message.volume)
+      break
+    case 'layer-fade-to':
+      handleLayerFadeTo(ws, message.assetId, message.duration)
       break
     case 'miniapp-enable':
       handleMiniAppEnable(ws, message.appId)
@@ -355,13 +363,34 @@ async function handlePlaylistPlay(
 
   const pb = room.playback
   pb.playlistId = playlistId
+  pb.playlistType = playlist.type ?? 'sequential'
   pb.playlistLength = playlist.assetIds.length
   pb.nextAssetId = null
 
-  // Build order, shuffling if needed
-  room.playlistOrder = pb.shuffle ? shuffleArray(playlist.assetIds) : [...playlist.assetIds]
-  pb.playlistIndex = 0
-  pb.assetId = room.playlistOrder[0]
+  // Build order, shuffling if needed (only for sequential playlists)
+  room.playlistOrder = pb.shuffle && pb.playlistType === 'sequential'
+    ? shuffleArray(playlist.assetIds)
+    : [...playlist.assetIds]
+
+  if (pb.playlistType === 'layered') {
+    // Layered playlist: all tracks play at once, use playlist's default volumes
+    pb.assetId = null  // No single "current" asset
+    pb.playlistIndex = -1
+    pb.layerVolumes = playlist.layerVolumes ?? {}
+    // If no default volumes set, default first track to 1, others to 0
+    if (Object.keys(pb.layerVolumes).length === 0 && playlist.assetIds.length > 0) {
+      for (const assetId of playlist.assetIds) {
+        pb.layerVolumes[assetId] = 0
+      }
+      pb.layerVolumes[playlist.assetIds[0]] = 1
+    }
+  } else {
+    // Sequential playlist: play one track at a time
+    pb.playlistIndex = 0
+    pb.assetId = room.playlistOrder[0]
+    pb.layerVolumes = {}
+  }
+
   pb.playing = true
   pb.currentTime = 0
   pb.timestamp = Date.now()
@@ -381,9 +410,11 @@ function handlePlaylistStop(ws: ServerWebSocket<WebSocketData>): void {
 
   const pb = room.playback
   pb.playlistId = null
+  pb.playlistType = 'sequential'
   pb.playlistIndex = -1
   pb.playlistLength = 0
   pb.nextAssetId = null
+  pb.layerVolumes = {}
   room.playlistOrder = []
 
   pb.assetId = null
@@ -391,6 +422,63 @@ function handlePlaylistStop(ws: ServerWebSocket<WebSocketData>): void {
   pb.currentTime = 0
   pb.timestamp = Date.now()
 
+  broadcast(campaignId, { type: 'playback-state', playback: pb })
+}
+
+function handleLayerVolume(
+  ws: ServerWebSocket<WebSocketData>,
+  assetId: string,
+  volume: number
+): void {
+  const { campaignId } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  const pb = room.playback
+  if (pb.playlistType !== 'layered') {
+    send(ws, { type: 'error', message: 'Not a layered playlist' })
+    return
+  }
+
+  // Clamp volume between 0 and 1
+  pb.layerVolumes[assetId] = Math.max(0, Math.min(1, volume))
+
+  // Don't update timestamp - volume changes don't affect playback position
+  broadcast(campaignId, { type: 'playback-state', playback: pb })
+}
+
+function handleLayerFadeTo(
+  ws: ServerWebSocket<WebSocketData>,
+  assetId: string,
+  duration?: number
+): void {
+  const { campaignId } = ws.data
+  if (!campaignId) {
+    send(ws, { type: 'error', message: 'Not in a campaign' })
+    return
+  }
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  const pb = room.playback
+  if (pb.playlistType !== 'layered') {
+    send(ws, { type: 'error', message: 'Not a layered playlist' })
+    return
+  }
+
+  // Set target asset to 1, all others to 0
+  for (const id of Object.keys(pb.layerVolumes)) {
+    pb.layerVolumes[id] = id === assetId ? 1 : 0
+  }
+
+  // Note: actual fading is handled client-side for smooth animation
+  // Server just sets the target state immediately
   broadcast(campaignId, { type: 'playback-state', playback: pb })
 }
 

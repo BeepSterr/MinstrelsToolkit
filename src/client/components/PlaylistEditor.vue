@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Playlist, Asset } from '../types'
 
 const props = defineProps<{
@@ -14,13 +14,41 @@ const emit = defineEmits<{
 }>()
 
 const name = ref(props.playlist?.name ?? '')
+const playlistType = ref<'sequential' | 'layered'>(props.playlist?.type ?? 'sequential')
 const selectedAssetIds = ref<string[]>(props.playlist?.assetIds ?? [])
+const layerVolumes = ref<Record<string, number>>(props.playlist?.layerVolumes ?? {})
 const saving = ref(false)
 const error = ref<string | null>(null)
 
 const audioAssets = computed(() =>
   props.assets.filter(a => a.type === 'audio' || a.type === 'video')
 )
+
+// Initialize volumes for assets when they're added
+watch(selectedAssetIds, (ids) => {
+  if (playlistType.value === 'layered') {
+    for (const id of ids) {
+      if (!(id in layerVolumes.value)) {
+        // First track defaults to 1, others to 0
+        layerVolumes.value[id] = Object.keys(layerVolumes.value).length === 0 ? 1 : 0
+      }
+    }
+    // Remove volumes for removed assets
+    for (const id of Object.keys(layerVolumes.value)) {
+      if (!ids.includes(id)) {
+        delete layerVolumes.value[id]
+      }
+    }
+  }
+}, { deep: true })
+
+function getLayerVolume(assetId: string): number {
+  return layerVolumes.value[assetId] ?? 0
+}
+
+function setLayerVolume(assetId: string, volume: number): void {
+  layerVolumes.value[assetId] = volume
+}
 
 const availableAssets = computed(() =>
   audioAssets.value.filter(a => !selectedAssetIds.value.includes(a.id))
@@ -68,7 +96,9 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: name.value.trim(),
+        type: playlistType.value,
         assetIds: selectedAssetIds.value,
+        layerVolumes: playlistType.value === 'layered' ? layerVolumes.value : undefined,
       }),
     })
 
@@ -102,6 +132,34 @@ async function handleSubmit() {
         />
       </div>
 
+      <div class="field">
+        <label>Type</label>
+        <div class="type-toggle">
+          <button
+            type="button"
+            :class="['type-btn', { active: playlistType === 'sequential' }]"
+            @click="playlistType = 'sequential'"
+            :disabled="saving"
+          >
+            Sequential
+          </button>
+          <button
+            type="button"
+            :class="['type-btn', { active: playlistType === 'layered' }]"
+            @click="playlistType = 'layered'"
+            :disabled="saving"
+          >
+            Layered
+          </button>
+        </div>
+        <p class="type-hint">
+          {{ playlistType === 'sequential'
+            ? 'Plays tracks one after another'
+            : 'Plays all tracks simultaneously with adjustable volumes'
+          }}
+        </p>
+      </div>
+
       <div class="tracks-section">
         <div class="tracks-header">
           <span>Tracks ({{ selectedAssetIds.length }})</span>
@@ -111,14 +169,28 @@ async function handleSubmit() {
           <li v-for="(assetId, index) in selectedAssetIds" :key="assetId" class="track-item">
             <span class="track-number">{{ index + 1 }}</span>
             <span class="track-name">{{ getAsset(assetId)?.name || 'Unknown' }}</span>
+            <div v-if="playlistType === 'layered'" class="layer-volume">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="getLayerVolume(assetId)"
+                @input="setLayerVolume(assetId, parseFloat(($event.target as HTMLInputElement).value))"
+                class="volume-slider"
+              />
+              <span class="volume-value">{{ Math.round(getLayerVolume(assetId) * 100) }}%</span>
+            </div>
             <div class="track-controls">
               <button
+                v-if="playlistType === 'sequential'"
                 type="button"
                 @click="moveAsset(index, -1)"
                 :disabled="index === 0"
                 class="btn-move"
               >↑</button>
               <button
+                v-if="playlistType === 'sequential'"
                 type="button"
                 @click="moveAsset(index, 1)"
                 :disabled="index === selectedAssetIds.length - 1"
@@ -366,5 +438,82 @@ button:disabled {
 
 .btn-primary:hover:not(:disabled) {
   background: #4752c4;
+}
+
+.type-toggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.type-btn {
+  flex: 1;
+  padding: 0.5rem;
+  background: #40444b;
+  border: 1px solid #40444b;
+  border-radius: 4px;
+  color: #72767d;
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.type-btn:hover:not(:disabled) {
+  background: #36393f;
+  color: #dcddde;
+}
+
+.type-btn.active {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: white;
+}
+
+.type-hint {
+  margin: 0.375rem 0 0;
+  font-size: 0.75rem;
+  color: #72767d;
+}
+
+.layer-volume {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  margin: 0 0.5rem;
+}
+
+.layer-volume .volume-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #40444b;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.layer-volume .volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #5865f2;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.layer-volume .volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #5865f2;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.volume-value {
+  font-size: 0.6875rem;
+  color: #72767d;
+  min-width: 32px;
+  text-align: right;
 }
 </style>

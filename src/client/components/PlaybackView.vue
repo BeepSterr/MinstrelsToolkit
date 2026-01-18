@@ -35,8 +35,9 @@ const {
 } = useWebSocket()
 
 const hasEnabledApps = computed(() => miniAppState.value.enabledApps.length > 0)
+const isLayeredPlaylist = computed(() => wsPlaybackState.value.playlistType === 'layered' && wsPlaybackState.value.playlistId !== null)
 
-const { preCacheAllAssets } = useAssetCache()
+const { preCacheAllAssets, getAssetUrl, revokeAssetUrl } = useAssetCache()
 
 const isCaching = ref(false)
 const cachedCount = ref(0)
@@ -72,6 +73,16 @@ const {
 const audioRef = ref<HTMLAudioElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
 
+// Layered playlist state
+const layeredAudioRefs = ref<Map<string, HTMLAudioElement>>(new Map())
+const layeredAssetUrls = ref<Map<string, string>>(new Map())
+const layeredAssetsLoading = ref(false)
+
+// Animated layer volumes (for smooth fading)
+const animatedLayerVolumes = ref<Record<string, number>>({})
+let fadeAnimationFrame: number | null = null
+const FADE_SPEED = 1 // Units per second (0 to 1 takes 0.5 seconds)
+
 // Local volume control (not synced)
 const volume = ref(parseFloat(localStorage.getItem('bardbox-volume') ?? '1'))
 
@@ -88,6 +99,192 @@ watch([audioRef, videoRef], () => {
 
 const isPlaying = computed(() => playbackState.value.playing)
 const hasPlaylist = computed(() => playbackState.value.playlistId !== null)
+
+// Layered playlist asset IDs from the playback state
+const layeredAssetIds = computed(() => {
+  if (!isLayeredPlaylist.value) return []
+  return Object.keys(wsPlaybackState.value.layerVolumes)
+})
+
+// Get asset info for a layer
+function getLayeredAsset(assetId: string): Asset | undefined {
+  return assets.value.find(a => a.id === assetId)
+}
+
+// Load all assets for a layered playlist
+async function loadLayeredAssets(assetIds: string[]) {
+  layeredAssetsLoading.value = true
+
+  // Revoke old URLs
+  for (const url of layeredAssetUrls.value.values()) {
+    revokeAssetUrl(url)
+  }
+  layeredAssetUrls.value.clear()
+  layeredAudioRefs.value.clear()
+
+  // Load new assets
+  for (const assetId of assetIds) {
+    const asset = assets.value.find(a => a.id === assetId)
+    if (asset && (asset.type === 'audio' || asset.type === 'video')) {
+      const url = await getAssetUrl(props.campaignId, asset)
+      layeredAssetUrls.value.set(assetId, url)
+    }
+  }
+
+  layeredAssetsLoading.value = false
+}
+
+// Sync all layered audio elements (time and play/pause only, not volume)
+function syncLayeredPlayback() {
+  if (!isLayeredPlaylist.value) return
+
+  const state = wsPlaybackState.value
+  const elapsed = (Date.now() - state.timestamp) / 1000
+  const targetTime = state.playing ? state.currentTime + elapsed : state.currentTime
+
+  for (const [assetId, audioEl] of layeredAudioRefs.value.entries()) {
+    // Sync time
+    if (Math.abs(audioEl.currentTime - targetTime) > 0.5) {
+      audioEl.currentTime = targetTime
+    }
+
+    // Sync play/pause
+    if (state.playing && audioEl.paused) {
+      audioEl.play().catch(() => {})
+    } else if (!state.playing && !audioEl.paused) {
+      audioEl.pause()
+    }
+  }
+}
+
+// Apply current animated volumes to audio elements
+function applyAnimatedVolumes() {
+  for (const [assetId, audioEl] of layeredAudioRefs.value.entries()) {
+    const animatedVolume = animatedLayerVolumes.value[assetId] ?? 0
+    audioEl.volume = animatedVolume * volume.value
+  }
+}
+
+// Animate layer volumes toward target
+let lastFadeTime = 0
+function animateFade(timestamp: number) {
+  if (!isLayeredPlaylist.value) {
+    fadeAnimationFrame = null
+    return
+  }
+
+  const deltaTime = lastFadeTime ? (timestamp - lastFadeTime) / 1000 : 0.016
+  lastFadeTime = timestamp
+
+  const targetVolumes = wsPlaybackState.value.layerVolumes
+  let needsMoreAnimation = false
+
+  for (const assetId of Object.keys(targetVolumes)) {
+    const target = targetVolumes[assetId] ?? 0
+    const current = animatedLayerVolumes.value[assetId] ?? 0
+
+    if (Math.abs(target - current) > 0.001) {
+      // Lerp toward target
+      const direction = target > current ? 1 : -1
+      const step = FADE_SPEED * deltaTime
+      const newValue = current + direction * step
+
+      // Clamp to not overshoot
+      if (direction > 0) {
+        animatedLayerVolumes.value[assetId] = Math.min(newValue, target)
+      } else {
+        animatedLayerVolumes.value[assetId] = Math.max(newValue, target)
+      }
+
+      if (Math.abs(animatedLayerVolumes.value[assetId] - target) > 0.001) {
+        needsMoreAnimation = true
+      }
+    }
+  }
+
+  applyAnimatedVolumes()
+
+  if (needsMoreAnimation) {
+    fadeAnimationFrame = requestAnimationFrame(animateFade)
+  } else {
+    fadeAnimationFrame = null
+    lastFadeTime = 0
+  }
+}
+
+// Start fade animation when target volumes change
+function startFadeAnimation() {
+  if (!isLayeredPlaylist.value) return
+
+  // Initialize animated volumes if empty
+  const targetVolumes = wsPlaybackState.value.layerVolumes
+  for (const assetId of Object.keys(targetVolumes)) {
+    if (!(assetId in animatedLayerVolumes.value)) {
+      animatedLayerVolumes.value[assetId] = targetVolumes[assetId] ?? 0
+    }
+  }
+
+  // Start animation if not already running
+  if (!fadeAnimationFrame) {
+    lastFadeTime = 0
+    fadeAnimationFrame = requestAnimationFrame(animateFade)
+  }
+}
+
+// Register a layered audio element
+function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
+  if (el) {
+    layeredAudioRefs.value.set(assetId, el)
+    // Apply initial volume from animated state
+    const animatedVolume = animatedLayerVolumes.value[assetId] ?? wsPlaybackState.value.layerVolumes[assetId] ?? 0
+    el.volume = animatedVolume * volume.value
+    syncLayeredPlayback()
+  } else {
+    layeredAudioRefs.value.delete(assetId)
+  }
+}
+
+// Watch for layered playlist changes
+watch(layeredAssetIds, async (ids, oldIds) => {
+  if (ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(oldIds || [])) {
+    // Initialize animated volumes for new playlist
+    const targetVolumes = wsPlaybackState.value.layerVolumes
+    animatedLayerVolumes.value = { ...targetVolumes }
+    await loadLayeredAssets(ids)
+  } else if (ids.length === 0) {
+    // Clear layered assets
+    for (const url of layeredAssetUrls.value.values()) {
+      revokeAssetUrl(url)
+    }
+    layeredAssetUrls.value.clear()
+    layeredAudioRefs.value.clear()
+    animatedLayerVolumes.value = {}
+    if (fadeAnimationFrame) {
+      cancelAnimationFrame(fadeAnimationFrame)
+      fadeAnimationFrame = null
+    }
+  }
+}, { immediate: true })
+
+// Watch for playback state changes to sync layered audio (time/play state)
+watch(
+  () => ({
+    playing: wsPlaybackState.value.playing,
+    currentTime: wsPlaybackState.value.currentTime,
+    timestamp: wsPlaybackState.value.timestamp,
+  }),
+  () => syncLayeredPlayback()
+)
+
+// Watch for layer volume changes to trigger fade animation
+watch(
+  () => wsPlaybackState.value.layerVolumes,
+  () => startFadeAnimation(),
+  { deep: true }
+)
+
+// Watch master volume changes to update layered audio
+watch(volume, () => applyAnimatedVolumes())
 
 function handleAssetSelect(asset: Asset) {
   selectAsset(asset.id)
@@ -203,6 +400,14 @@ onMounted(async () => {
 onUnmounted(() => {
   unsubscribe()
   leaveCampaign()
+  // Clean up fade animation
+  if (fadeAnimationFrame) {
+    cancelAnimationFrame(fadeAnimationFrame)
+  }
+  // Clean up layered asset URLs
+  for (const url of layeredAssetUrls.value.values()) {
+    revokeAssetUrl(url)
+  }
 })
 </script>
 
@@ -248,8 +453,57 @@ onUnmounted(() => {
 
     <div class="content">
       <main class="playback-area">
-        <div v-if="loading" class="loading">Loading asset...</div>
+        <div v-if="loading || layeredAssetsLoading" class="loading">Loading asset...</div>
 
+        <!-- Layered Playlist View -->
+        <template v-else-if="isLayeredPlaylist">
+          <div class="layered-view">
+            <div class="layered-header">
+              <span class="layered-icon">🎚️</span>
+              <span class="layered-title">Layered Playlist</span>
+              <span class="layered-count">{{ layeredAssetIds.length }} tracks</span>
+            </div>
+
+            <div class="layered-tracks">
+              <div
+                v-for="assetId in layeredAssetIds"
+                :key="assetId"
+                :class="['layered-track', { active: (animatedLayerVolumes[assetId] ?? 0) > 0.5 }]"
+              >
+                <span class="track-name">{{ getLayeredAsset(assetId)?.name || 'Unknown' }}</span>
+                <span class="track-volume">{{ Math.round((animatedLayerVolumes[assetId] ?? 0) * 100) }}%</span>
+              </div>
+            </div>
+
+            <!-- Hidden audio elements for each layer -->
+            <audio
+              v-for="assetId in layeredAssetIds"
+              :key="assetId"
+              :ref="(el) => registerLayeredAudio(assetId, el as HTMLAudioElement)"
+              :src="layeredAssetUrls.get(assetId)"
+              loop
+            ></audio>
+          </div>
+
+          <div class="controls">
+            <button @click="togglePlayback" class="btn-play">
+              {{ isPlaying ? '⏸️ Pause' : '▶️ Play' }}
+            </button>
+            <div class="volume-control">
+              <span class="volume-icon">{{ volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊' }}</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                v-model.number="volume"
+                class="volume-slider"
+              />
+            </div>
+          </div>
+        </template>
+
+        <!-- Regular Asset/Playlist View -->
         <div v-else-if="!currentAsset" class="empty">
           Select an asset or playlist to play
         </div>
@@ -701,5 +955,74 @@ onUnmounted(() => {
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
+}
+
+.layered-view {
+  text-align: center;
+}
+
+.layered-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.layered-icon {
+  font-size: 3rem;
+}
+
+.layered-title {
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.layered-count {
+  color: #72767d;
+  font-size: 0.875rem;
+}
+
+.layered-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.layered-track {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #40444b;
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.layered-track.active {
+  background: rgba(88, 101, 242, 0.2);
+  border-left-color: #5865f2;
+}
+
+.layered-track .track-name {
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layered-track .track-volume {
+  font-size: 0.75rem;
+  color: #72767d;
+  min-width: 40px;
+  text-align: right;
+}
+
+.layered-track.active .track-volume {
+  color: #5865f2;
+  font-weight: 500;
 }
 </style>

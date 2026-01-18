@@ -21,7 +21,9 @@ export interface Playlist {
   id: string
   campaignId: string
   name: string
+  type: 'sequential' | 'layered'
   assetIds: string[]
+  layerVolumes?: Record<string, number>  // For layered playlists: assetId -> default volume (0-1)
   createdAt: string
   updatedAt: string
 }
@@ -33,12 +35,15 @@ export interface PlaybackState {
   timestamp: number
   // Playlist info (for admin UI)
   playlistId: string | null
+  playlistType: 'sequential' | 'layered'
   playlistIndex: number
   playlistLength: number
   loop: boolean
   shuffle: boolean
   // Single queued track (overrides normal playlist order)
   nextAssetId: string | null
+  // Layered playlist: current volumes for each track
+  layerVolumes: Record<string, number>
 }
 
 export interface DiscordUser {
@@ -82,6 +87,8 @@ export type ClientMessage =
   | { type: 'playlist-settings'; loop?: boolean; shuffle?: boolean }
   | { type: 'queue-asset'; assetId: string }
   | { type: 'queue-jump'; assetId: string }
+  | { type: 'layer-volume'; assetId: string; volume: number }
+  | { type: 'layer-fade-to'; assetId: string; duration?: number }
   | { type: 'miniapp-enable'; appId: string }
   | { type: 'miniapp-disable'; appId: string }
   | { type: 'miniapp-action'; appId: string; action: string; payload?: unknown }

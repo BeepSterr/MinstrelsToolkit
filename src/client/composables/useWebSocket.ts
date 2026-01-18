@@ -12,11 +12,13 @@ const playbackState = ref<PlaybackState>({
   currentTime: 0,
   timestamp: Date.now(),
   playlistId: null,
+  playlistType: 'sequential',
   playlistIndex: -1,
   playlistLength: 0,
   loop: false,
   shuffle: false,
   nextAssetId: null,
+  layerVolumes: {},
 })
 const users = ref<DiscordUser[]>([])
 const error = ref<string | null>(null)
@@ -274,6 +276,14 @@ export function useWebSocket() {
     send({ type: 'queue-jump', assetId })
   }
 
+  function setLayerVolume(assetId: string, volume: number): void {
+    send({ type: 'layer-volume', assetId, volume })
+  }
+
+  function fadeToLayer(assetId: string, duration?: number): void {
+    send({ type: 'layer-fade-to', assetId, duration })
+  }
+
   function enableMiniApp(appId: string): void {
     send({ type: 'miniapp-enable', appId })
   }
@@ -322,6 +332,8 @@ export function useWebSocket() {
     setShuffle,
     queueAsset,
     jumpToAsset,
+    setLayerVolume,
+    fadeToLayer,
     enableMiniApp,
     disableMiniApp,
     dispatchMiniAppAction,

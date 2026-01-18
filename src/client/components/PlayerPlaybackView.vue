@@ -32,6 +32,21 @@ const currentAsset = ref<Asset | null>(null)
 const assetUrl = ref<string | null>(null)
 const loading = ref(false)
 
+// Layered playlist state
+const isLayeredPlaylist = computed(() => playbackState.value.playlistType === 'layered' && playbackState.value.playlistId !== null)
+const layeredAudioRefs = ref<Map<string, HTMLAudioElement>>(new Map())
+const layeredAssetUrls = ref<Map<string, string>>(new Map())
+
+// Animated layer volumes (for smooth fading)
+const animatedLayerVolumes = ref<Record<string, number>>({})
+let fadeAnimationFrame: number | null = null
+const FADE_SPEED = 1 // Units per second (0 to 1 takes 0.5 seconds)
+
+const layeredAssetIds = computed(() => {
+  if (!isLayeredPlaylist.value) return []
+  return Object.keys(playbackState.value.layerVolumes)
+})
+
 const isCaching = ref(false)
 const cachedCount = ref(0)
 const totalCount = ref(0)
@@ -92,6 +107,170 @@ function syncPlayback() {
     el.pause()
   }
 }
+
+// Load all assets for a layered playlist
+async function loadLayeredAssets(assetIds: string[]) {
+  // Revoke old URLs
+  for (const url of layeredAssetUrls.value.values()) {
+    revokeAssetUrl(url)
+  }
+  layeredAssetUrls.value.clear()
+  layeredAudioRefs.value.clear()
+
+  // Load new assets
+  for (const assetId of assetIds) {
+    const asset = assets.value.find(a => a.id === assetId)
+    if (asset && (asset.type === 'audio' || asset.type === 'video')) {
+      const url = await getAssetUrl(props.campaignId, asset)
+      layeredAssetUrls.value.set(assetId, url)
+    }
+  }
+}
+
+// Sync all layered audio elements (time and play/pause only, not volume)
+function syncLayeredPlayback() {
+  if (!isLayeredPlaylist.value) return
+
+  const state = playbackState.value
+  const elapsed = (Date.now() - state.timestamp) / 1000
+  const targetTime = state.playing ? state.currentTime + elapsed : state.currentTime
+
+  for (const [assetId, audioEl] of layeredAudioRefs.value.entries()) {
+    // Sync time
+    if (Math.abs(audioEl.currentTime - targetTime) > 0.5) {
+      audioEl.currentTime = targetTime
+    }
+
+    // Sync play/pause
+    if (state.playing && audioEl.paused) {
+      audioEl.play().catch(() => {})
+    } else if (!state.playing && !audioEl.paused) {
+      audioEl.pause()
+    }
+  }
+}
+
+// Apply current animated volumes to audio elements
+function applyAnimatedVolumes() {
+  for (const [assetId, audioEl] of layeredAudioRefs.value.entries()) {
+    const animatedVolume = animatedLayerVolumes.value[assetId] ?? 0
+    audioEl.volume = animatedVolume * volume.value
+  }
+}
+
+// Animate layer volumes toward target
+let lastFadeTime = 0
+function animateFade(timestamp: number) {
+  if (!isLayeredPlaylist.value) {
+    fadeAnimationFrame = null
+    return
+  }
+
+  const deltaTime = lastFadeTime ? (timestamp - lastFadeTime) / 1000 : 0.016
+  lastFadeTime = timestamp
+
+  const targetVolumes = playbackState.value.layerVolumes
+  let needsMoreAnimation = false
+
+  for (const assetId of Object.keys(targetVolumes)) {
+    const target = targetVolumes[assetId] ?? 0
+    const current = animatedLayerVolumes.value[assetId] ?? 0
+
+    if (Math.abs(target - current) > 0.001) {
+      const direction = target > current ? 1 : -1
+      const step = FADE_SPEED * deltaTime
+      const newValue = current + direction * step
+
+      if (direction > 0) {
+        animatedLayerVolumes.value[assetId] = Math.min(newValue, target)
+      } else {
+        animatedLayerVolumes.value[assetId] = Math.max(newValue, target)
+      }
+
+      if (Math.abs(animatedLayerVolumes.value[assetId] - target) > 0.001) {
+        needsMoreAnimation = true
+      }
+    }
+  }
+
+  applyAnimatedVolumes()
+
+  if (needsMoreAnimation) {
+    fadeAnimationFrame = requestAnimationFrame(animateFade)
+  } else {
+    fadeAnimationFrame = null
+    lastFadeTime = 0
+  }
+}
+
+// Start fade animation when target volumes change
+function startFadeAnimation() {
+  if (!isLayeredPlaylist.value) return
+
+  const targetVolumes = playbackState.value.layerVolumes
+  for (const assetId of Object.keys(targetVolumes)) {
+    if (!(assetId in animatedLayerVolumes.value)) {
+      animatedLayerVolumes.value[assetId] = targetVolumes[assetId] ?? 0
+    }
+  }
+
+  if (!fadeAnimationFrame) {
+    lastFadeTime = 0
+    fadeAnimationFrame = requestAnimationFrame(animateFade)
+  }
+}
+
+// Register a layered audio element
+function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
+  if (el) {
+    layeredAudioRefs.value.set(assetId, el)
+    const animatedVolume = animatedLayerVolumes.value[assetId] ?? playbackState.value.layerVolumes[assetId] ?? 0
+    el.volume = animatedVolume * volume.value
+    syncLayeredPlayback()
+  } else {
+    layeredAudioRefs.value.delete(assetId)
+  }
+}
+
+// Watch for layered playlist changes
+watch(layeredAssetIds, async (ids, oldIds) => {
+  if (ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(oldIds || [])) {
+    const targetVolumes = playbackState.value.layerVolumes
+    animatedLayerVolumes.value = { ...targetVolumes }
+    await loadLayeredAssets(ids)
+  } else if (ids.length === 0) {
+    for (const url of layeredAssetUrls.value.values()) {
+      revokeAssetUrl(url)
+    }
+    layeredAssetUrls.value.clear()
+    layeredAudioRefs.value.clear()
+    animatedLayerVolumes.value = {}
+    if (fadeAnimationFrame) {
+      cancelAnimationFrame(fadeAnimationFrame)
+      fadeAnimationFrame = null
+    }
+  }
+}, { immediate: true })
+
+// Watch for playback state changes to sync layered audio (time/play state)
+watch(
+  () => ({
+    playing: playbackState.value.playing,
+    currentTime: playbackState.value.currentTime,
+    timestamp: playbackState.value.timestamp,
+  }),
+  () => syncLayeredPlayback()
+)
+
+// Watch for layer volume changes to trigger fade animation
+watch(
+  () => playbackState.value.layerVolumes,
+  () => startFadeAnimation(),
+  { deep: true }
+)
+
+// Watch master volume changes to update layered audio
+watch(volume, () => applyAnimatedVolumes())
 
 watch(
   () => playbackState.value.assetId,
@@ -160,6 +339,14 @@ onUnmounted(() => {
   if (assetUrl.value) {
     revokeAssetUrl(assetUrl.value)
   }
+  // Clean up layered assets
+  for (const url of layeredAssetUrls.value.values()) {
+    revokeAssetUrl(url)
+  }
+  // Cancel fade animation
+  if (fadeAnimationFrame) {
+    cancelAnimationFrame(fadeAnimationFrame)
+  }
 })
 </script>
 
@@ -214,13 +401,25 @@ onUnmounted(() => {
     <main class="playback-area">
       <MiniAppsContainer :campaign-id="campaignId" />
 
-      <!-- Hidden audio element for background playback -->
+      <!-- Hidden audio element for regular playback -->
       <audio
-        v-if="currentAsset?.type === 'audio'"
+        v-if="currentAsset?.type === 'audio' && !isLayeredPlaylist"
         ref="audioRef"
         :src="assetUrl!"
         class="hidden-audio"
       ></audio>
+
+      <!-- Hidden audio elements for layered playlist -->
+      <template v-if="isLayeredPlaylist">
+        <audio
+          v-for="assetId in layeredAssetIds"
+          :key="assetId"
+          :ref="(el) => registerLayeredAudio(assetId, el as HTMLAudioElement)"
+          :src="layeredAssetUrls.get(assetId)"
+          class="hidden-audio"
+          loop
+        ></audio>
+      </template>
     </main>
   </div>
 </template>

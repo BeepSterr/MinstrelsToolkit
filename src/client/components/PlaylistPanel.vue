@@ -13,7 +13,7 @@ const emit = defineEmits<{
   create: []
 }>()
 
-const { playbackState, playPlaylist, stopPlaylist, setLoop, setShuffle, queueAsset, jumpToAsset, next, prev } = useWebSocket()
+const { playbackState, playPlaylist, stopPlaylist, setLoop, setShuffle, queueAsset, jumpToAsset, next, prev, setLayerVolume, fadeToLayer } = useWebSocket()
 
 const playlists = ref<Playlist[]>([])
 const loading = ref(true)
@@ -22,6 +22,24 @@ const clickTimers = ref<Record<string, number>>({})
 
 const isPlaying = computed(() => playbackState.value.playlistId !== null)
 const currentPlaylistId = computed(() => playbackState.value.playlistId)
+const isLayeredPlaylist = computed(() => playbackState.value.playlistType === 'layered')
+
+function getLayerVolume(assetId: string): number {
+  return playbackState.value.layerVolumes[assetId] ?? 0
+}
+
+function handleLayerVolumeChange(assetId: string, event: Event): void {
+  const value = parseFloat((event.target as HTMLInputElement).value)
+  setLayerVolume(assetId, value)
+}
+
+function handleFadeTo(assetId: string): void {
+  fadeToLayer(assetId)
+}
+
+function isActiveLayer(assetId: string): boolean {
+  return getLayerVolume(assetId) > 0.5
+}
 
 async function fetchPlaylists() {
   loading.value = true
@@ -151,7 +169,38 @@ defineExpose({ refresh: fetchPlaylists })
           </div>
         </div>
 
-        <ul v-if="expandedPlaylistId === playlist.id" class="track-list">
+        <!-- Layered playlist track list -->
+        <ul v-if="expandedPlaylistId === playlist.id && playlist.type === 'layered' && currentPlaylistId === playlist.id" class="track-list layered">
+          <li
+            v-for="assetId in playlist.assetIds"
+            :key="assetId"
+            :class="['track-item', { active: isActiveLayer(assetId) }]"
+          >
+            <span class="track-icon">
+              {{ getAssetType(assetId) === 'audio' ? '🎵' : getAssetType(assetId) === 'video' ? '🎬' : '🖼️' }}
+            </span>
+            <span class="track-name">{{ getAssetName(assetId) }}</span>
+            <div class="layer-controls">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="getLayerVolume(assetId)"
+                @input="handleLayerVolumeChange(assetId, $event)"
+                class="layer-slider"
+              />
+              <button
+                @click.stop="handleFadeTo(assetId)"
+                class="btn-fade"
+                title="Fade to this track"
+              >Fade</button>
+            </div>
+          </li>
+        </ul>
+
+        <!-- Sequential or non-playing layered playlist track list -->
+        <ul v-else-if="expandedPlaylistId === playlist.id" class="track-list">
           <li
             v-for="assetId in playlist.assetIds"
             :key="assetId"
@@ -165,6 +214,7 @@ defineExpose({ refresh: fetchPlaylists })
               {{ getAssetType(assetId) === 'audio' ? '🎵' : getAssetType(assetId) === 'video' ? '🎬' : '🖼️' }}
             </span>
             <span class="track-name">{{ getAssetName(assetId) }}</span>
+            <span v-if="playlist.type === 'layered'" class="layered-badge">Layer</span>
             <span v-if="isCurrentTrack(assetId)" class="now-playing">▶</span>
             <span v-else-if="isQueuedNext(assetId)" class="queued-badge">Next</span>
           </li>
@@ -370,5 +420,76 @@ defineExpose({ refresh: fetchPlaylists })
   padding: 0.125rem 0.375rem;
   border-radius: 10px;
   font-weight: 600;
+}
+
+.layered-badge {
+  background: #5865f2;
+  color: #fff;
+  font-size: 0.5625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.track-list.layered .track-item {
+  flex-wrap: wrap;
+  padding: 0.625rem 0.75rem;
+}
+
+.track-list.layered .track-item.active {
+  background: rgba(88, 101, 242, 0.2);
+  border-left-color: #5865f2;
+}
+
+.layer-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.layer-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #40444b;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.layer-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #5865f2;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.layer-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #5865f2;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-fade {
+  background: #5865f2;
+  border: none;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.btn-fade:hover {
+  background: #4752c4;
 }
 </style>

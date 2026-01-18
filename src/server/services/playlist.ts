@@ -58,7 +58,11 @@ export async function getPlaylist(
 
 export async function createPlaylist(
   campaignId: string,
-  data: Pick<Playlist, 'name'> & { assetIds?: string[] }
+  data: Pick<Playlist, 'name'> & {
+    assetIds?: string[]
+    type?: 'sequential' | 'layered'
+    layerVolumes?: Record<string, number>
+  }
 ): Promise<Playlist | null> {
   const campaign = await getCampaign(campaignId)
   if (!campaign) return null
@@ -72,7 +76,9 @@ export async function createPlaylist(
     id,
     campaignId,
     name: data.name,
+    type: data.type || 'sequential',
     assetIds: data.assetIds || [],
+    layerVolumes: data.layerVolumes,
     createdAt: now,
     updatedAt: now,
   }
@@ -88,7 +94,7 @@ export async function createPlaylist(
 export async function updatePlaylist(
   campaignId: string,
   playlistId: string,
-  data: Partial<Pick<Playlist, 'name' | 'assetIds'>>
+  data: Partial<Pick<Playlist, 'name' | 'assetIds' | 'type' | 'layerVolumes'>>
 ): Promise<Playlist | null> {
   const playlist = await getPlaylist(campaignId, playlistId)
   if (!playlist) return null
@@ -96,6 +102,8 @@ export async function updatePlaylist(
   const updated: Playlist = {
     ...playlist,
     ...data,
+    // Ensure type has a default for older playlists
+    type: data.type ?? playlist.type ?? 'sequential',
     updatedAt: new Date().toISOString(),
   }
 
