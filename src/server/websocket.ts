@@ -690,7 +690,7 @@ function handleMiniAppAction(
   }
 
   const currentState = room.miniApps.appStates[appId] ?? {}
-  let newState = currentState
+  let newState: unknown = currentState
 
   // App-specific reducers
   if (appId === 'media-display') {

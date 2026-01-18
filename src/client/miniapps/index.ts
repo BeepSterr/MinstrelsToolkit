@@ -320,7 +320,7 @@ registerMiniApp({
         if (s.phase !== 'joining' || s.players.length === 0) return s
 
         let deck = [...s.deck]
-        const players = s.players.map(p => ({ ...p, hand: [] as Card[], status: 'playing' as const }))
+        const players = s.players.map(p => ({ ...p, hand: [] as Card[], status: 'playing' as BlackjackPlayer['status'] }))
         const dealer = { hand: [] as Card[], hidden: true }
 
         // Deal 2 cards to each player and dealer

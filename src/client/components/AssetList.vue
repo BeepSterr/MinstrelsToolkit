@@ -94,7 +94,6 @@ defineExpose({ refresh: fetchAssets, assets })
 .asset-list {
   border-left: 1px solid #40444b;
   padding: 1rem;
-  width: 280px;
   overflow-y: auto;
 }
 
