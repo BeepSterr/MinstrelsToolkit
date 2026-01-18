@@ -254,11 +254,20 @@ function startFadeAnimation() {
   }
 }
 
+// Debug: track time update sources
+const DEBUG_TIME = true
+function debugTime(source: string, time: number, extra?: Record<string, unknown>) {
+  if (!DEBUG_TIME) return
+  console.log(`[TIME] ${source}: ${time.toFixed(2)}s`, extra ?? '')
+}
+
 // Clean up layered progress tracking listeners
 function cleanupLayeredProgressListeners() {
   if (layeredProgressAudio) {
+    console.log('[DEBUG] cleanupLayeredProgressListeners called, layeredProgressAudio exists')
     if (layeredTimeUpdateHandler) {
       layeredProgressAudio.removeEventListener('timeupdate', layeredTimeUpdateHandler)
+      console.log('[DEBUG] Removed timeupdate listener from layeredProgressAudio')
     }
     if (layeredMetadataHandler) {
       layeredProgressAudio.removeEventListener('loadedmetadata', layeredMetadataHandler)
@@ -266,18 +275,23 @@ function cleanupLayeredProgressListeners() {
     layeredProgressAudio = null
     layeredTimeUpdateHandler = null
     layeredMetadataHandler = null
+  } else {
+    console.log('[DEBUG] cleanupLayeredProgressListeners called, but no layeredProgressAudio')
   }
 }
 
 // Pause all layered audio elements
 function pauseAllLayeredAudio() {
-  for (const audioEl of layeredAudioRefs.value.values()) {
+  console.log('[DEBUG] pauseAllLayeredAudio called, refs count:', layeredAudioRefs.value.size)
+  for (const [assetId, audioEl] of layeredAudioRefs.value.entries()) {
+    console.log('[DEBUG] Pausing audio:', assetId, 'currentTime:', audioEl.currentTime)
     audioEl.pause()
   }
 }
 
 // Register a layered audio element
 function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
+  console.log('[DEBUG] registerLayeredAudio:', { assetId, hasEl: !!el, currentSize: layeredAudioRefs.value.size })
   if (el) {
     layeredAudioRefs.value.set(assetId, el)
     // Apply initial volume from animated state
@@ -287,8 +301,10 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
 
     // Track time from first layered audio for the progress bar
     if (layeredAudioRefs.value.size === 1 && !layeredProgressAudio) {
+      console.log('[DEBUG] Setting up layered progress tracking for asset:', assetId)
       layeredProgressAudio = el
       layeredTimeUpdateHandler = () => {
+        debugTime('layered', el.currentTime, { assetId, paused: el.paused })
         mediaCurrentTime.value = el.currentTime
       }
       layeredMetadataHandler = () => {
@@ -300,7 +316,9 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
   } else {
     // Element is being unmounted - pause it first
     const oldEl = layeredAudioRefs.value.get(assetId)
+    console.log('[DEBUG] Unregistering audio:', assetId, 'found:', !!oldEl, 'isProgressAudio:', oldEl === layeredProgressAudio)
     if (oldEl) {
+      console.log('[DEBUG] Pausing unregistered audio, currentTime:', oldEl.currentTime)
       oldEl.pause()
       // Clean up progress listeners if this was the tracked element
       if (oldEl === layeredProgressAudio) {
@@ -311,9 +329,26 @@ function registerLayeredAudio(assetId: string, el: HTMLAudioElement | null) {
   }
 }
 
+// Watch for entering/leaving layered mode - pause regular audio when entering
+watch(isLayeredPlaylist, (isLayered) => {
+  if (isLayered) {
+    console.log('[DEBUG] Entering layered mode, pausing regular audio/video')
+    if (audioRef.value) {
+      audioRef.value.pause()
+      console.log('[DEBUG] Paused audioRef')
+    }
+    if (videoRef.value) {
+      videoRef.value.pause()
+      console.log('[DEBUG] Paused videoRef')
+    }
+  }
+})
+
 // Watch for layered playlist changes
 watch(layeredAssetIds, async (ids, oldIds) => {
+  console.log('[DEBUG] layeredAssetIds changed:', { ids, oldIds })
   if (ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(oldIds || [])) {
+    console.log('[DEBUG] Switching layered playlists, cleaning up...')
     // Pause and clean up old layered audio before switching
     pauseAllLayeredAudio()
     cleanupLayeredProgressListeners()
@@ -322,6 +357,7 @@ watch(layeredAssetIds, async (ids, oldIds) => {
     animatedLayerVolumes.value = { ...targetVolumes }
     await loadLayeredAssets(ids)
   } else if (ids.length === 0) {
+    console.log('[DEBUG] Leaving layered playlist, cleaning up all...')
     // Pause and clean up all layered audio
     pauseAllLayeredAudio()
     cleanupLayeredProgressListeners()
@@ -373,6 +409,25 @@ function togglePlayback() {
 
 function handleTimeUpdate(event: Event) {
   const el = event.target as HTMLMediaElement
+
+  // Ignore events from stale audio elements
+  if (isLayeredPlaylist.value) {
+    console.log('[DEBUG] Ignoring regular timeupdate during layered mode')
+    return
+  }
+
+  // Only accept events from the current audioRef or videoRef
+  if (el !== audioRef.value && el !== videoRef.value) {
+    console.log('[DEBUG] Ignoring timeupdate from stale element, currentTime:', el.currentTime)
+    el.pause() // Pause the stale element
+    return
+  }
+
+  debugTime('regular', el.currentTime, {
+    assetId: currentAsset.value?.id,
+    paused: el.paused,
+    isLayered: isLayeredPlaylist.value
+  })
   mediaCurrentTime.value = el.currentTime
 }
 
