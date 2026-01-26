@@ -22,6 +22,7 @@ const {
   playbackState,
   joinCampaign,
   leaveCampaign,
+  sendSyncProgress,
   onMessage,
 } = useWebSocket()
 
@@ -325,10 +326,40 @@ const unsubscribe = onMessage((message) => {
   }
 })
 
+// Throttle sync progress updates to max 1 per 100ms
+let lastSyncProgressTime = 0
+const SYNC_PROGRESS_THROTTLE = 100
+
+function throttledSendSyncProgress(progress: number): void {
+  const now = Date.now()
+  // Always send 100% immediately
+  if (progress === 100 || now - lastSyncProgressTime >= SYNC_PROGRESS_THROTTLE) {
+    lastSyncProgressTime = now
+    sendSyncProgress(progress)
+  }
+}
+
 onMounted(async () => {
   await fetchAssets()
 
-  // Pre-cache all assets
+  // Wait for connection and identification before joining campaign
+  await new Promise<void>((resolve) => {
+    if (connected.value && identified.value) {
+      resolve()
+      return
+    }
+    const checkConnection = setInterval(() => {
+      if (connected.value && identified.value) {
+        clearInterval(checkConnection)
+        resolve()
+      }
+    }, 100)
+  })
+
+  // Join campaign BEFORE caching (so GM sees us immediately with 0% progress)
+  joinCampaign(props.campaignId)
+
+  // Pre-cache all assets with progress reporting
   if (assets.value.length > 0) {
     isCaching.value = true
     totalCount.value = assets.value.length
@@ -336,17 +367,13 @@ onMounted(async () => {
     await preCacheAllAssets(props.campaignId, assets.value, (cached, total) => {
       cachedCount.value = cached
       totalCount.value = total
+      throttledSendSyncProgress(Math.round((cached / total) * 100))
     })
     isCaching.value = false
   }
 
-  // Wait for connection and identification before joining campaign
-  const checkConnection = setInterval(() => {
-    if (connected.value && identified.value) {
-      joinCampaign(props.campaignId)
-      clearInterval(checkConnection)
-    }
-  }, 100)
+  // Signal sync complete
+  sendSyncProgress(100)
 })
 
 onUnmounted(() => {

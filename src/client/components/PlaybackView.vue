@@ -8,6 +8,7 @@ import PlaylistEditor from './PlaylistEditor.vue'
 import MiniAppsPanel from './MiniAppsPanel.vue'
 import MiniAppsContainer from './MiniAppsContainer.vue'
 import MusicBar from './MusicBar.vue'
+import UserAvatar from './UserAvatar.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePlayback } from '../composables/usePlayback'
 import { useAssetCache } from '../composables/useAssetCache'
@@ -25,6 +26,7 @@ const {
   connected,
   reconnecting,
   users,
+  userSyncProgress,
   playbackState: wsPlaybackState,
   miniAppState,
   joinCampaign,
@@ -614,21 +616,13 @@ onUnmounted(() => {
           {{ connected ? 'Connected' : reconnecting ? 'Reconnecting...' : 'Connecting...' }}
         </span>
         <div class="user-avatars" v-if="users.length > 0">
-          <div
+          <UserAvatar
             v-for="user in users"
             :key="user.id"
-            class="user-avatar"
-            :title="user.global_name || user.username"
-          >
-            <img
-              v-if="user.avatar"
-              :src="`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=32`"
-              :alt="user.global_name || user.username"
-            />
-            <span v-else class="avatar-fallback">
-              {{ (user.global_name || user.username).charAt(0).toUpperCase() }}
-            </span>
-          </div>
+            :user="user"
+            :sync-progress="userSyncProgress.get(user.id)"
+            :size="28"
+          />
         </div>
         <span v-else class="users">No users</span>
         <button @click="reloadPlayers" class="btn-reload" title="Reload player views">
@@ -882,36 +876,15 @@ onUnmounted(() => {
 .user-avatars {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
 }
 
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: #40444b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.user-avatars > :deep(*) {
   border: 2px solid #36393f;
   margin-left: -8px;
 }
 
-.user-avatar:first-child {
+.user-avatars > :deep(*:first-child) {
   margin-left: 0;
-}
-
-.user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar-fallback {
-  color: #dcddde;
-  font-size: 0.75rem;
-  font-weight: 600;
 }
 
 .content {

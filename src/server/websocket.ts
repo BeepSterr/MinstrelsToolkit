@@ -45,6 +45,7 @@ function getOrCreateRoom(campaignId: string): RoomState {
       playback: getDefaultPlaybackState(),
       connections: new Set(),
       users: new Map(),
+      userSyncProgress: new Map(),
       playlistOrder: [],
       miniApps: getDefaultMiniAppState(),
     }
@@ -92,6 +93,7 @@ export function handleClose(ws: ServerWebSocket<WebSocketData>): void {
     const room = rooms.get(campaignId)
     if (room) {
       room.connections.delete(id)
+      room.userSyncProgress.delete(id)
 
       if (user) {
         room.users.delete(id)
@@ -166,6 +168,9 @@ export function handleMessage(
     case 'reload-players':
       handleReloadPlayers(ws)
       break
+    case 'sync-progress':
+      handleSyncProgress(ws, message.progress)
+      break
     default:
       send(ws, { type: 'error', message: 'Unknown message type' })
   }
@@ -196,14 +201,21 @@ function handleJoinCampaign(
   // GM connects without identifying and just observes
   if (user) {
     room.users.set(id, user)
-    broadcast(campaignId, { type: 'user-joined', user }, id)
+    room.userSyncProgress.set(id, 0)  // Start at 0% sync progress
+    broadcast(campaignId, { type: 'user-joined', user, syncProgress: 0 }, id)
   }
+
+  // Build users array with sync progress for each user
+  const usersWithProgress = Array.from(room.users.entries()).map(([connId, u]) => ({
+    ...u,
+    syncProgress: room.userSyncProgress.get(connId) ?? 100,
+  }))
 
   send(ws, {
     type: 'campaign-joined',
     campaignId,
     playback: room.playback,
-    users: Array.from(room.users.values()),
+    users: usersWithProgress,
     miniApps: room.miniApps,
   })
 }
@@ -215,6 +227,7 @@ function handleLeaveCampaign(ws: ServerWebSocket<WebSocketData>): void {
   const room = rooms.get(campaignId)
   if (room) {
     room.connections.delete(id)
+    room.userSyncProgress.delete(id)
 
     if (user) {
       room.users.delete(id)
@@ -667,6 +680,23 @@ function handleReloadPlayers(ws: ServerWebSocket<WebSocketData>): void {
       send(client, { type: 'reload' })
     }
   }
+}
+
+function handleSyncProgress(
+  ws: ServerWebSocket<WebSocketData>,
+  progress: number
+): void {
+  const { id, campaignId, user } = ws.data
+  if (!campaignId || !user) return
+
+  const room = rooms.get(campaignId)
+  if (!room) return
+
+  // Store the progress
+  room.userSyncProgress.set(id, progress)
+
+  // Broadcast to room (excluding sender)
+  broadcast(campaignId, { type: 'user-sync-progress', userId: user.id, progress }, id)
 }
 
 function handleMiniAppAction(

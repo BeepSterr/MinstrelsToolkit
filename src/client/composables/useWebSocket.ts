@@ -21,6 +21,7 @@ const playbackState = ref<PlaybackState>({
   layerVolumes: {},
 })
 const users = ref<DiscordUser[]>([])
+const userSyncProgress = ref<Map<string, number>>(new Map())
 const error = ref<string | null>(null)
 const miniAppState = ref<MiniAppState>({ enabledApps: [], appStates: {} })
 const currentUser = ref<DiscordUser | null>(null)
@@ -58,6 +59,10 @@ function handleMessage(event: MessageEvent): void {
       playbackState.value = message.playback
       users.value = message.users
       miniAppState.value = message.miniApps
+      // Initialize sync progress map from users array
+      userSyncProgress.value = new Map(
+        message.users.map(u => [u.id, u.syncProgress ?? 100])
+      )
       break
     case 'playback-state':
       playbackState.value = message.playback
@@ -83,9 +88,14 @@ function handleMessage(event: MessageEvent): void {
       if (!users.value.some((u) => u.id === message.user.id)) {
         users.value = [...users.value, message.user]
       }
+      userSyncProgress.value.set(message.user.id, message.syncProgress ?? 0)
       break
     case 'user-left':
       users.value = users.value.filter((u) => u.id !== message.userId)
+      userSyncProgress.value.delete(message.userId)
+      break
+    case 'user-sync-progress':
+      userSyncProgress.value.set(message.userId, message.progress)
       break
     case 'error':
       error.value = message.message
@@ -300,6 +310,10 @@ export function useWebSocket() {
     send({ type: 'reload-players' })
   }
 
+  function sendSyncProgress(progress: number): void {
+    send({ type: 'sync-progress', progress })
+  }
+
   function onMessage(handler: MessageHandler): () => void {
     messageHandlers.add(handler)
     return () => messageHandlers.delete(handler)
@@ -312,6 +326,7 @@ export function useWebSocket() {
     currentCampaignId,
     playbackState,
     users,
+    userSyncProgress,
     error,
     miniAppState,
     currentUser,
@@ -338,6 +353,7 @@ export function useWebSocket() {
     disableMiniApp,
     dispatchMiniAppAction,
     reloadPlayers,
+    sendSyncProgress,
     onMessage,
   }
 }

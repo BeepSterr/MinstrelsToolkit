@@ -71,16 +71,22 @@ export type ClientMessage =
   | { type: 'miniapp-disable'; appId: string }
   | { type: 'miniapp-action'; appId: string; action: string; payload?: unknown }
   | { type: 'reload-players' }
+  | { type: 'sync-progress'; progress: number }
+
+export interface UserWithSyncProgress extends DiscordUser {
+  syncProgress: number
+}
 
 export type ServerMessage =
-  | { type: 'campaign-joined'; campaignId: string; playback: PlaybackState; users: DiscordUser[]; miniApps: MiniAppState }
+  | { type: 'campaign-joined'; campaignId: string; playback: PlaybackState; users: UserWithSyncProgress[]; miniApps: MiniAppState }
   | { type: 'playback-state'; playback: PlaybackState }
   | { type: 'queue-updated'; playback: PlaybackState }
   | { type: 'asset-selected'; assetId: string | null }
   | { type: 'assets-updated'; campaignId: string }
   | { type: 'playlists-updated'; campaignId: string }
-  | { type: 'user-joined'; user: DiscordUser }
+  | { type: 'user-joined'; user: DiscordUser; syncProgress: number }
   | { type: 'user-left'; userId: string }
+  | { type: 'user-sync-progress'; userId: string; progress: number }
   | { type: 'error'; message: string }
   | { type: 'miniapp-state'; miniApps: MiniAppState }
   | { type: 'miniapp-updated'; appId: string; state: unknown }
