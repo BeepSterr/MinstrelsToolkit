@@ -7,7 +7,7 @@ import {
 } from './websocket'
 import type { WebSocketData } from './types'
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000
+const PORT = parseInt(process.env.PORT || process.env.VIRTUAL_PORT || '3000')
 const CLIENT_DIR = './dist/client'
 
 console.log(process.env.DISCORD_CLIENT_SECRET)
