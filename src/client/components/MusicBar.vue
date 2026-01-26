@@ -148,25 +148,25 @@ const activeLayer = computed(() => {
         {{ pendingNextPhase ? 'Queued...' : 'Next Phase ⏭' }}
       </button>
 
+      <!-- Layer Quick Fade Buttons -->
+      <div v-if="isLayered && layers && layers.length > 0" class="layer-buttons">
+        <button
+            v-for="layer in layers"
+            :key="layer.id"
+            @click="emit('fade-to-layer', layer.id)"
+            :class="['btn-layer', { active: layer.volume > 0.5 }]"
+            :title="layer.name"
+        >
+          {{ layer.name.slice(0, 8) }}{{ layer.name.length > 8 ? '…' : '' }}
+        </button>
+      </div>
+
       <!-- Progress Bar -->
       <span class="time">{{ formatTime(currentTime) }}</span>
       <div class="progress-bar" :class="{ 'interact': !isLayered}" @click="!isLayered && handleSeek($event)">
         <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
       </div>
       <span class="time">{{ formatTime(duration) }}</span>
-    </div>
-
-    <!-- Layer Quick Fade Buttons -->
-    <div v-if="isLayered && layers && layers.length > 0" class="layer-buttons">
-      <button
-        v-for="layer in layers"
-        :key="layer.id"
-        @click="emit('fade-to-layer', layer.id)"
-        :class="['btn-layer', { active: layer.volume > 0.5 }]"
-        :title="layer.name"
-      >
-        {{ layer.name.slice(0, 8) }}{{ layer.name.length > 8 ? '…' : '' }}
-      </button>
     </div>
 
     <!-- Playlist Controls (not shown for progressive - shuffle/loop don't apply) -->

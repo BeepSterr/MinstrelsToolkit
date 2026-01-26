@@ -424,6 +424,8 @@ onUnmounted(() => {
         ref="audioRef"
         :src="assetUrl!"
         class="hidden-audio"
+        @canplay="syncPlayback"
+        @loadedmetadata="syncPlayback"
       ></audio>
 
       <!-- Hidden audio elements for layered playlist -->
@@ -435,6 +437,7 @@ onUnmounted(() => {
           :src="layeredAssetUrls.get(assetId)"
           class="hidden-audio"
           loop
+          @canplay="syncLayeredPlayback"
         ></audio>
       </template>
     </main>
