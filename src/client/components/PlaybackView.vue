@@ -440,9 +440,9 @@ function handleTimeUpdate(event: Event) {
   }
 
   // Only accept events from the current audioRef or videoRef
+  // Don't pause here - when switching songs, the new audio element may fire timeupdate
+  // before Vue's ref is updated, so we'd incorrectly pause the new element
   if (el !== audioRef.value && el !== videoRef.value) {
-    console.log('[DEBUG] Ignoring timeupdate from stale element, currentTime:', el.currentTime)
-    el.pause() // Pause the stale element
     return
   }
 
