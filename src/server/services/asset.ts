@@ -32,12 +32,17 @@ async function compressAudio(inputPath: string, outputPath: string): Promise<boo
         await unlink(tempPath).catch(() => {})
         resolve(false)
       } else {
-        // Remove original if different from output, then move temp to output
-        if (inputPath !== outputPath) {
-          await unlink(inputPath).catch(() => {})
+        try {
+          // Remove original if different from output, then move temp to output
+          if (inputPath !== outputPath) {
+            await unlink(inputPath).catch(() => {})
+          }
+          await rename(tempPath, outputPath)
+          resolve(true)
+        } catch (err) {
+          console.error(`[compress] Failed to rename temp file for ${inputPath}:`, err)
+          resolve(false)
         }
-        await rename(tempPath, outputPath)
-        resolve(true)
       }
     })
 
@@ -120,7 +125,6 @@ export async function createAsset(
   const originalPath = getAssetFilePath(campaignId, id, originalExt)
   await Bun.write(originalPath, arrayBuffer)
 
-  let finalExt = originalExt
   let finalSize = file.size
   let finalMimeType = file.type || 'application/octet-stream'
   let finalFilename = file.name
@@ -135,7 +139,6 @@ export async function createAsset(
     if (success) {
       const compressedFile = Bun.file(compressedPath)
       finalSize = compressedFile.size
-      finalExt = '.mp3'
       finalMimeType = 'audio/mpeg'
       finalFilename = file.name.replace(originalExt, '.mp3')
       wasCompressed = true
