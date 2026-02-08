@@ -60,6 +60,8 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const totalSize = computed(() => formatSize(assets.value.reduce((sum, a) => sum + a.size, 0)))
+
 watch(() => props.campaignId, fetchAssets, { immediate: true })
 
 defineExpose({ refresh: fetchAssets, assets })
@@ -68,7 +70,10 @@ defineExpose({ refresh: fetchAssets, assets })
 <template>
   <div class="asset-list">
     <div class="header">
-      <h3>Assets</h3>
+      <div>
+        <h3>Assets</h3>
+        <span v-if="assets.length > 0" class="total-size">{{ assets.length }} files · {{ totalSize }}</span>
+      </div>
       <button @click="emit('upload')" class="btn-primary">Upload</button>
     </div>
 
@@ -128,6 +133,11 @@ defineExpose({ refresh: fetchAssets, assets })
 .header h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.total-size {
+  font-size: 0.75rem;
+  color: #72767d;
 }
 
 .btn-primary {

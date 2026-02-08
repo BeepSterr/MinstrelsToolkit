@@ -272,14 +272,19 @@ export async function compressAllAudioAssets(
   let savedBytes = 0
 
   for (const asset of audioAssets) {
+    console.log(`[compress] Compressing asset "${asset.name}" (${asset.id})`)
     const result = await compressExistingAsset(campaignId, asset.id)
     if (result?.success) {
       if (result.skipped) {
+        console.log(`[compress] Skipped "${asset.name}" (already compressed)`)
         skipped++
       } else {
         compressed++
         savedBytes += result.originalSize - result.newSize
+        console.log(`[compress] Compressed "${asset.name}" (${result.originalSize} -> ${result.newSize} bytes)`)
       }
+    } else {
+      console.log(`[compress] Failed to compress "${asset.name}"`)
     }
   }
 
