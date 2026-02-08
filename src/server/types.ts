@@ -15,6 +15,7 @@ export interface Asset {
   mimeType: string
   size: number
   createdAt: string
+  compressed?: boolean // True if audio has been compressed
 }
 
 export interface Playlist {

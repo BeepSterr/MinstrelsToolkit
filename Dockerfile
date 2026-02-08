@@ -21,6 +21,9 @@ FROM oven/bun:1-slim
 
 WORKDIR /app
 
+# Install ffmpeg for audio compression
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Copy package files and install production dependencies
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production

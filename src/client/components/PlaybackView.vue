@@ -610,7 +610,10 @@ onUnmounted(() => {
   <div class="playback-view">
     <header class="toolbar">
       <button @click="emit('back')" class="btn-back">← Back</button>
-      <h2>{{ campaignName }}</h2>
+      <div class="campaign-info">
+        <h2>{{ campaignName }}</h2>
+        <span class="campaign-id">{{ campaignId }}</span>
+      </div>
       <div class="status">
         <span :class="['connection', { connected, reconnecting }]">
           {{ connected ? 'Connected' : reconnecting ? 'Reconnecting...' : 'Connecting...' }}
@@ -804,10 +807,19 @@ onUnmounted(() => {
   color: #fff;
 }
 
-.toolbar h2 {
+.campaign-info {
   flex: 1;
+}
+
+.campaign-info h2 {
   margin: 0;
   font-size: 1.25rem;
+}
+
+.campaign-id {
+  font-size: 0.75rem;
+  color: #72767d;
+  font-family: monospace;
 }
 
 .status {

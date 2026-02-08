@@ -221,6 +221,36 @@ const routes: Route[] = [
     },
   },
   {
+    pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/assets\/(?<assetId>[^/]+)\/compress$/,
+    methods: ['POST'],
+    handler: async (req, params) => {
+      const { campaignId, assetId } = params
+
+      const result = await assetService.compressExistingAsset(campaignId, assetId)
+      if (!result) {
+        return notFound('Asset not found')
+      }
+
+      if (result.success) {
+        broadcastAssetsUpdated(campaignId)
+      }
+
+      return json(result)
+    },
+  },
+  {
+    pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/compress-audio$/,
+    methods: ['POST'],
+    handler: async (req, params) => {
+      const { campaignId } = params
+
+      const result = await assetService.compressAllAudioAssets(campaignId)
+      broadcastAssetsUpdated(campaignId)
+
+      return json(result)
+    },
+  },
+  {
     pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/playlists$/,
     methods: ['GET', 'POST'],
     handler: async (req, params) => {
