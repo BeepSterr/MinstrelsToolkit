@@ -151,7 +151,12 @@ const routes: Route[] = [
       }
 
       if (req.method === 'POST') {
-        const formData = await req.formData()
+        let formData: FormData
+        try {
+          formData = await req.formData()
+        } catch {
+          return badRequest('Upload failed — incomplete request body')
+        }
         const file = formData.get('file') as File | null
 
         if (!file) {
@@ -161,6 +166,10 @@ const routes: Route[] = [
         const asset = await assetService.createAsset(campaignId, file)
         if (asset) {
           broadcastAssetsUpdated(campaignId)
+          // Compress in background — don't block the upload response
+          assetService.compressNewAsset(campaignId, asset).then((compressed) => {
+            if (compressed) broadcastAssetsUpdated(campaignId)
+          })
           return json(asset, 201)
         }
         return notFound('Campaign not found')

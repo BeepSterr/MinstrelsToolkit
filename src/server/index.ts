@@ -48,6 +48,7 @@ async function serveStatic(path: string): Promise<Response | null> {
 const server = Bun.serve<WebSocketData>({
   port: PORT,
   idleTimeout: 120, // seconds — audio compression can take a while
+  maxRequestBodySize: 1024 * 1024 * 1024 * 5, // 5GB
 
   async fetch(req, server) {
     const url = new URL(req.url)

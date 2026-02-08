@@ -26,7 +26,10 @@ export default defineConfig({
         'dev.awoo.red'
     ],
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': {
+        target: 'http://localhost:3000',
+        timeout: 0, // No timeout for large uploads + compression
+      },
       '/ws': {
         target: 'ws://localhost:3000',
         ws: true,

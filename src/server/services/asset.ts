@@ -7,16 +7,52 @@ import { getCampaign } from './campaign'
 const STORAGE_PATH = './storage/campaigns'
 
 // Audio compression settings
-const AUDIO_BITRATE = '128k' // 128kbps is good for soundtracks
+const AUDIO_BITRATE = '96k' // 96kbps Opus ≈ 128kbps MP3 quality
+const AUDIO_CODEC = 'libopus'
+const AUDIO_EXT = '.ogg'
+const AUDIO_MIME = 'audio/ogg'
+const SKIP_BITRATE_THRESHOLD = 96000 // Skip re-encoding if source is lossy and at/below this
+
+const LOSSY_FORMATS = new Set([
+  'mp3', 'aac', 'ogg', 'opus', 'wma', 'vorbis', 'm4a',
+])
+
+async function getAudioBitrate(filePath: string): Promise<{ bitrate: number; codec: string } | null> {
+  return new Promise((resolve) => {
+    const probe = spawn('ffprobe', [
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_format',
+      '-show_streams',
+      filePath,
+    ])
+
+    let stdout = ''
+    probe.stdout?.on('data', (data: Buffer) => { stdout += data.toString() })
+    probe.on('close', (code) => {
+      if (code !== 0) { resolve(null); return }
+      try {
+        const info = JSON.parse(stdout)
+        const audioStream = info.streams?.find((s: any) => s.codec_type === 'audio')
+        const bitrate = parseInt(audioStream?.bit_rate || info.format?.bit_rate || '0', 10)
+        const codec = (audioStream?.codec_name || '').toLowerCase()
+        resolve({ bitrate, codec })
+      } catch { resolve(null) }
+    })
+    probe.on('error', () => resolve(null))
+  })
+}
 
 async function compressAudio(inputPath: string, outputPath: string): Promise<boolean> {
   // FFmpeg can't write to the same file it's reading from, so use a temp file
-  const tempPath = outputPath + '.tmp.mp3'
+  const tempPath = outputPath + '.tmp.ogg'
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', [
       '-i', inputPath,
-      '-codec:a', 'libmp3lame',
+      '-vn', // Strip album art / video streams
+      '-codec:a', AUDIO_CODEC,
       '-b:a', AUDIO_BITRATE,
+      '-vbr', 'on',
       '-y', // Overwrite output
       tempPath
     ])
@@ -110,7 +146,6 @@ export async function getAsset(campaignId: string, assetId: string): Promise<Ass
 export async function createAsset(
   campaignId: string,
   file: File,
-  compress: boolean = true
 ): Promise<Asset | null> {
   const campaign = await getCampaign(campaignId)
   if (!campaign) return null
@@ -118,48 +153,66 @@ export async function createAsset(
   const id = crypto.randomUUID()
   const originalExt = extname(file.name) || '.bin'
   const now = new Date().toISOString()
-  const isAudio = file.type.startsWith('audio/')
 
   // Write the original file first
   const arrayBuffer = await file.arrayBuffer()
   const originalPath = getAssetFilePath(campaignId, id, originalExt)
   await Bun.write(originalPath, arrayBuffer)
 
-  let finalSize = file.size
-  let finalMimeType = file.type || 'application/octet-stream'
-  let finalFilename = file.name
-
-  let wasCompressed = false
-
-  // Compress audio files if enabled
-  if (compress && isAudio) {
-    const compressedPath = getAssetFilePath(campaignId, id, '.mp3')
-    const success = await compressAudio(originalPath, compressedPath)
-
-    if (success) {
-      const compressedFile = Bun.file(compressedPath)
-      finalSize = compressedFile.size
-      finalMimeType = 'audio/mpeg'
-      finalFilename = file.name.replace(originalExt, '.mp3')
-      wasCompressed = true
-    }
-  }
-
   const asset: Asset = {
     id,
     campaignId,
     name: file.name.replace(originalExt, ''),
     type: getAssetType(file.type),
-    filename: finalFilename,
-    mimeType: finalMimeType,
-    size: finalSize,
+    filename: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    size: file.size,
     createdAt: now,
-    compressed: wasCompressed || undefined,
   }
 
   await Bun.write(getAssetJsonPath(campaignId, id), JSON.stringify(asset, null, 2))
 
   return asset
+}
+
+// Compress an asset in the background after upload. Returns a promise that resolves when done.
+export async function compressNewAsset(
+  campaignId: string,
+  asset: Asset,
+): Promise<boolean> {
+  if (asset.type !== 'audio') return false
+
+  const originalExt = extname(asset.filename) || '.bin'
+  const originalPath = getAssetFilePath(campaignId, asset.id, originalExt)
+
+  // Check if source is already a low-bitrate lossy format
+  const probeResult = await getAudioBitrate(originalPath)
+  const isLossy = probeResult && LOSSY_FORMATS.has(probeResult.codec)
+  const alreadySmall = isLossy && probeResult.bitrate > 0 && probeResult.bitrate <= SKIP_BITRATE_THRESHOLD
+
+  if (alreadySmall) {
+    console.log(`[compress] Skipping "${asset.name}" — already ${probeResult.codec} at ${Math.round(probeResult.bitrate / 1000)}kbps`)
+    return false
+  }
+
+  const compressedPath = getAssetFilePath(campaignId, asset.id, AUDIO_EXT)
+  const success = await compressAudio(originalPath, compressedPath)
+
+  if (success) {
+    const compressedFile = Bun.file(compressedPath)
+    const updatedAsset: Asset = {
+      ...asset,
+      filename: asset.name + AUDIO_EXT,
+      mimeType: AUDIO_MIME,
+      size: compressedFile.size,
+      compressed: true,
+    }
+    await Bun.write(getAssetJsonPath(campaignId, asset.id), JSON.stringify(updatedAsset, null, 2))
+    console.log(`[compress] Compressed "${asset.name}" (${asset.size} -> ${compressedFile.size} bytes)`)
+    return true
+  }
+
+  return false
 }
 
 export async function updateAsset(
@@ -236,8 +289,18 @@ export async function compressExistingAsset(
 
   const originalSize = asset.size
 
+  // Check if source is already a low-bitrate lossy format
+  const probeResult = await getAudioBitrate(originalPath)
+  const isLossy = probeResult && LOSSY_FORMATS.has(probeResult.codec)
+  const alreadySmall = isLossy && probeResult.bitrate > 0 && probeResult.bitrate <= SKIP_BITRATE_THRESHOLD
+
+  if (alreadySmall) {
+    console.log(`[compress] Skipping "${asset.name}" — already ${probeResult.codec} at ${Math.round(probeResult.bitrate / 1000)}kbps`)
+    return { success: true, originalSize, newSize: originalSize, skipped: true }
+  }
+
   // Compress to new path
-  const compressedPath = getAssetFilePath(campaignId, assetId, '.mp3')
+  const compressedPath = getAssetFilePath(campaignId, assetId, AUDIO_EXT)
   const success = await compressAudio(originalPath, compressedPath)
 
   if (!success) {
@@ -250,8 +313,8 @@ export async function compressExistingAsset(
   // Update asset metadata
   const updatedAsset: Asset = {
     ...asset,
-    filename: asset.name + '.mp3',
-    mimeType: 'audio/mpeg',
+    filename: asset.name + AUDIO_EXT,
+    mimeType: AUDIO_MIME,
     size: newSize,
     compressed: true,
   }

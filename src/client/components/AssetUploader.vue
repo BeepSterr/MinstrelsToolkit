@@ -46,26 +46,42 @@ async function uploadFiles() {
   progress.value = 0
 
   try {
+    const failed: string[] = []
+
     for (let i = 0; i < files.value.length; i++) {
       const file = files.value[i]
-      const formData = new FormData()
-      formData.append('file', file)
+      let uploaded = false
 
-      const response = await fetch(
-        `/api/campaigns/${props.campaignId}/assets`,
-        {
-          method: 'POST',
-          body: formData,
+      for (let attempt = 0; attempt < 3 && !uploaded; attempt++) {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const response = await fetch(
+          `/api/campaigns/${props.campaignId}/assets`,
+          {
+            method: 'POST',
+            body: formData,
+          }
+        )
+
+        if (response.ok) {
+          uploaded = true
+        } else if (attempt < 2) {
+          console.warn(`Upload attempt ${attempt + 1} failed for ${file.name}, retrying...`)
+          await new Promise(r => setTimeout(r, 500))
         }
-      )
+      }
 
-      if (!response.ok) {
-        throw new Error(`Failed to upload ${file.name}`)
+      if (!uploaded) {
+        failed.push(file.name)
       }
 
       progress.value = ((i + 1) / files.value.length) * 100
     }
 
+    if (failed.length > 0) {
+      error.value = `Failed to upload: ${failed.join(', ')}`
+    }
     emit('uploaded')
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Upload failed'

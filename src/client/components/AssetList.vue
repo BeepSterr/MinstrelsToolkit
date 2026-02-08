@@ -15,6 +15,8 @@ const emit = defineEmits<{
 const assets = ref<Asset[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
+const editingId = ref<string | null>(null)
+const editingName = ref('')
 
 const filteredAssets = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -37,6 +39,24 @@ async function deleteAsset(id: string) {
 
   await fetch(`/api/campaigns/${props.campaignId}/assets/${id}`, {
     method: 'DELETE',
+  })
+  await fetchAssets()
+}
+
+function startRename(asset: Asset) {
+  editingId.value = asset.id
+  editingName.value = asset.name
+}
+
+async function submitRename(asset: Asset) {
+  const newName = editingName.value.trim()
+  editingId.value = null
+  if (!newName || newName === asset.name) return
+
+  await fetch(`/api/campaigns/${props.campaignId}/assets/${asset.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: newName }),
   })
   await fetchAssets()
 }
@@ -105,7 +125,18 @@ defineExpose({ refresh: fetchAssets, assets })
           <div class="info" @click="emit('select', asset)">
             <span class="icon">{{ getTypeIcon(asset.type) }}</span>
             <div class="details">
-              <span class="name">{{ asset.name }}</span>
+              <input
+                v-if="editingId === asset.id"
+                v-model="editingName"
+                class="rename-input"
+                @keydown.enter="submitRename(asset)"
+                @keydown.escape="editingId = null"
+                @blur="submitRename(asset)"
+                @click.stop
+                ref="renameInput"
+                @vue:mounted="($event: any) => $event.el.focus()"
+              />
+              <span v-else class="name" @dblclick.stop="startRename(asset)">{{ asset.name }}</span>
               <span class="meta">{{ asset.type }} · {{ formatSize(asset.size) }}</span>
             </div>
           </div>
@@ -234,6 +265,18 @@ defineExpose({ refresh: fetchAssets, assets })
 
 .item.selected .meta {
   color: rgba(255, 255, 255, 0.7);
+}
+
+.rename-input {
+  background: #40444b;
+  border: 1px solid #5865f2;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 0.875rem;
+  padding: 0.125rem 0.25rem;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
 }
 
 .btn-delete {
