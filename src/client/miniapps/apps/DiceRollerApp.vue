@@ -24,6 +24,7 @@ const { state, dispatch } = useMiniApp<DiceRollerState>('dice-roller')
 
 const diceTypes = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100']
 const customDice = ref('')
+const fudgeDice = ref('d20')
 const fudgeValue = ref<number | null>(null)
 const rolling = ref<string | null>(null)
 
@@ -72,10 +73,14 @@ function rollCustom() {
 }
 
 function fudgeRoll() {
-  if (fudgeValue.value !== null && customDice.value) {
-    dispatch('fudge', { dice: customDice.value, result: fudgeValue.value })
-    customDice.value = ''
-    fudgeValue.value = null
+  if (fudgeValue.value !== null && fudgeDice.value) {
+    dispatch('fudge', { dice: fudgeDice.value, result: fudgeValue.value })
+  }
+}
+
+function rollDiceBatch(dice: string, count: number) {
+  for (let i = 0; i < count; i++) {
+    dispatch('roll', { dice })
   }
 }
 
@@ -115,6 +120,16 @@ function getRollClass(dice: string, result: number): string {
           <span class="dice-label">{{ dice }}</span>
         </button>
       </div>
+      <div class="dice-buttons">
+        <button
+          v-for="dice in diceTypes"
+          :key="'x10-' + dice"
+          @click="rollDiceBatch(dice, 10)"
+          class="dice-btn dice-btn-batch"
+        >
+          <span class="dice-label">{{ dice }} ×10</span>
+        </button>
+      </div>
 
       <div class="custom-roll">
         <input
@@ -130,12 +145,9 @@ function getRollClass(dice: string, result: number): string {
       </div>
 
       <div class="fudge-roll">
-        <input
-          v-model="customDice"
-          type="text"
-          placeholder="Dice (e.g., d20)"
-          class="fudge-dice-input"
-        />
+        <select v-model="fudgeDice" class="fudge-dice-input">
+          <option v-for="dice in diceTypes" :key="dice" :value="dice">{{ dice }}</option>
+        </select>
         <input
           v-model.number="fudgeValue"
           type="number"
@@ -144,7 +156,7 @@ function getRollClass(dice: string, result: number): string {
         />
         <button
           @click="fudgeRoll"
-          :disabled="!customDice || fudgeValue === null"
+          :disabled="!fudgeDice || fudgeValue === null"
           class="fudge-btn"
         >
           Fudge
@@ -170,14 +182,9 @@ function getRollClass(dice: string, result: number): string {
             <div
               v-for="roll in group.rolls"
               :key="roll.id"
-              :class="['roll-tile', getRollClass(roll.dice, roll.result)]"
+              :class="['roll-tile', getRollClass(roll.dice, roll.result), { clickable: isGM }]"
+              @click="isGM && removeRoll(roll.id)"
             >
-              <button
-                v-if="isGM"
-                @click="removeRoll(roll.id)"
-                class="remove-btn"
-                title="Remove roll"
-              >×</button>
               <span class="roll-result">{{ roll.result }}</span>
             </div>
           </div>
@@ -295,6 +302,7 @@ function getRollClass(dice: string, result: number): string {
   color: #dcddde;
   width: 100px;
   text-align: center;
+  appearance: auto;
 }
 
 .fudge-value-input {
@@ -450,30 +458,20 @@ function getRollClass(dice: string, result: number): string {
   color: #3ba55c;
 }
 
-.remove-btn {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: #72767d;
-  font-size: 1rem;
-  line-height: 1;
+.roll-tile.clickable {
   cursor: pointer;
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
+  transition: background 0.15s;
 }
 
-.roll-tile:hover .remove-btn {
-  opacity: 1;
+.roll-tile.clickable:hover {
+  background: #ed424540;
 }
 
-.remove-btn:hover {
-  background: #ed4245;
-  color: white;
+.dice-btn-batch {
+  padding: 0.375rem 0.75rem;
+}
+
+.dice-btn-batch .dice-label {
+  font-size: 0.675rem;
 }
 </style>
