@@ -17,6 +17,8 @@ const loading = ref(true)
 const searchQuery = ref('')
 const editingId = ref<string | null>(null)
 const editingName = ref('')
+const compressing = ref(false)
+const compressResult = ref<string | null>(null)
 
 const filteredAssets = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -74,6 +76,25 @@ function getTypeIcon(type: Asset['type']): string {
   }
 }
 
+async function compressAll() {
+  compressing.value = true
+  compressResult.value = null
+  try {
+    const response = await fetch(`/api/campaigns/${props.campaignId}/compress-audio`, {
+      method: 'POST',
+    })
+    const data = await response.json()
+    compressResult.value = `Compressed ${data.compressed}/${data.total}, skipped ${data.skipped}, saved ${formatSize(data.savedBytes)}`
+    await fetchAssets()
+    setTimeout(() => { compressResult.value = null }, 5000)
+  } catch {
+    compressResult.value = 'Compression failed'
+    setTimeout(() => { compressResult.value = null }, 5000)
+  } finally {
+    compressing.value = false
+  }
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -94,8 +115,19 @@ defineExpose({ refresh: fetchAssets, assets })
         <h3>Assets</h3>
         <span v-if="assets.length > 0" class="total-size">{{ assets.length }} files · {{ totalSize }}</span>
       </div>
-      <button @click="emit('upload')" class="btn-primary">Upload</button>
+      <div class="header-actions">
+        <button
+          @click="compressAll"
+          :disabled="compressing"
+          class="btn-compress"
+          title="Compress all audio assets"
+        >
+          <span :class="{ spinning: compressing }">↻</span>
+        </button>
+        <button @click="emit('upload')" class="btn-primary">Upload</button>
+      </div>
     </div>
+    <div v-if="compressResult" class="compress-result">{{ compressResult }}</div>
 
     <div v-if="loading" class="loading">Loading assets...</div>
 
@@ -169,6 +201,53 @@ defineExpose({ refresh: fetchAssets, assets })
 .total-size {
   font-size: 0.75rem;
   color: #72767d;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.btn-compress {
+  background: #40444b;
+  color: #dcddde;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.125rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-compress:hover:not(:disabled) {
+  background: #5865f2;
+}
+
+.btn-compress:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spinning {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.compress-result {
+  font-size: 0.75rem;
+  color: #3ba55c;
+  text-align: center;
+  padding: 0.25rem 0;
+  margin-bottom: 0.5rem;
 }
 
 .btn-primary {
