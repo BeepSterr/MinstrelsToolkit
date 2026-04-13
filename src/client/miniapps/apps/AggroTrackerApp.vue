@@ -178,6 +178,7 @@ function addEnemy() {
 }
 
 function removeEnemy(enemyId: string) {
+  if (!confirm('Remove this enemy?')) return
   dispatch('remove-enemy', { enemyId })
 }
 
@@ -187,10 +188,12 @@ function selectEnemy(enemyId: string) {
 
 function resetAllHate() {
   if (!activeEnemyId.value) return
+  if (!confirm('Reset all hate for this enemy?')) return
   dispatch('reset-hate', { enemyId: activeEnemyId.value })
 }
 
 function clearAll() {
+  if (!confirm('Clear all enemies and hate data?')) return
   dispatch('clear')
 }
 
