@@ -27,11 +27,11 @@ export default defineConfig({
     ],
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:4529',
         timeout: 0, // No timeout for large uploads + compression
       },
       '/ws': {
-        target: 'ws://localhost:3000',
+        target: 'ws://localhost:4529',
         ws: true,
       },
     },

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import type { Asset, Playlist } from '../types'
+import type { Asset, Playlist, Character } from '../types'
 import AssetList from './AssetList.vue'
 import AssetUploader from './AssetUploader.vue'
 import PlaylistPanel from './PlaylistPanel.vue'
 import PlaylistEditor from './PlaylistEditor.vue'
+import CharacterPanel from './CharacterPanel.vue'
+import CharacterEditor from './CharacterEditor.vue'
 import MiniAppsPanel from './MiniAppsPanel.vue'
 import MiniAppsContainer from './MiniAppsContainer.vue'
 import MusicBar from './MusicBar.vue'
@@ -53,9 +55,11 @@ const totalCount = ref(0)
 const assetListRef = ref<InstanceType<typeof AssetList> | null>(null)
 const playlistPanelRef = ref<InstanceType<typeof PlaylistPanel> | null>(null)
 
-type SidebarView = 'assets' | 'upload' | 'playlists' | 'playlist-edit' | 'apps'
+type SidebarView = 'assets' | 'upload' | 'playlists' | 'playlist-edit' | 'characters' | 'character-edit' | 'apps'
 const sidebarView = ref<SidebarView>('assets')
 const editingPlaylist = ref<Playlist | undefined>(undefined)
+const editingCharacter = ref<Character | undefined>(undefined)
+const characterPanelRef = ref<InstanceType<typeof CharacterPanel> | null>(null)
 
 const assets = ref<Asset[]>([])
 const campaignIdRef = computed(() => props.campaignId)
@@ -534,6 +538,27 @@ function handlePlaylistCancel() {
   editingPlaylist.value = undefined
 }
 
+function handleEditCharacter(character: Character) {
+  editingCharacter.value = character
+  sidebarView.value = 'character-edit'
+}
+
+function handleCreateCharacter() {
+  editingCharacter.value = undefined
+  sidebarView.value = 'character-edit'
+}
+
+function handleCharacterSaved() {
+  sidebarView.value = 'characters'
+  editingCharacter.value = undefined
+  characterPanelRef.value?.refresh()
+}
+
+function handleCharacterCancel() {
+  sidebarView.value = 'characters'
+  editingCharacter.value = undefined
+}
+
 watch(audioRef, (el) => {
   if (el && currentAsset.value?.type === 'audio') {
     setMediaElement(el)
@@ -697,6 +722,10 @@ onUnmounted(() => {
             @click="sidebarView = 'playlists'"
           >Playlists</button>
           <button
+            :class="['tab', { active: sidebarView === 'characters' || sidebarView === 'character-edit' }]"
+            @click="sidebarView = 'characters'"
+          >Characters</button>
+          <button
             :class="['tab', { active: sidebarView === 'apps' }]"
             @click="sidebarView = 'apps'"
           >Apps</button>
@@ -737,6 +766,22 @@ onUnmounted(() => {
               @create="handleCreatePlaylist"
             />
           </template>
+
+          <CharacterEditor
+            v-else-if="sidebarView === 'character-edit'"
+            :campaign-id="campaignId"
+            :character="editingCharacter"
+            @save="handleCharacterSaved"
+            @cancel="handleCharacterCancel"
+          />
+
+          <CharacterPanel
+            v-else-if="sidebarView === 'characters'"
+            ref="characterPanelRef"
+            :campaign-id="campaignId"
+            @edit="handleEditCharacter"
+            @create="handleCreateCharacter"
+          />
 
           <MiniAppsPanel
             v-else-if="sidebarView === 'apps'"

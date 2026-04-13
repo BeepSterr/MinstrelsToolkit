@@ -4,6 +4,7 @@ import MediaDisplayControls from './apps/MediaDisplayControls.vue'
 import DiceRollerApp from './apps/DiceRollerApp.vue'
 import QuizApp from './apps/QuizApp.vue'
 import BlackjackApp from './apps/BlackjackApp.vue'
+import AggroTrackerApp from './apps/AggroTrackerApp.vue'
 
 // Register built-in apps
 registerMiniApp({
@@ -501,6 +502,222 @@ registerMiniApp({
           currentPlayerIndex: 0,
           deck: [],
         }
+      }
+
+      default:
+        return s
+    }
+  },
+})
+
+// Aggro Tracker types
+interface AggroCharacterHate {
+  damage: number
+  healing: number
+  special: number
+}
+
+interface AggroEnemy {
+  id: string
+  name: string
+  hate: Record<string, AggroCharacterHate>
+}
+
+type AggroAbilityType = 'stalwart' | 'lucid-dreaming' | 'diversion'
+
+interface AggroActiveAbility {
+  type: AggroAbilityType
+  turnsRemaining: number
+  firstActionUsed: boolean
+}
+
+interface AggroState {
+  enemies: AggroEnemy[]
+  activeEnemyId: string | null
+  turnOrder: string[]
+  abilities: Record<string, AggroActiveAbility>
+}
+
+registerMiniApp({
+  id: 'aggro-tracker',
+  name: 'Hate Tracker',
+  description: 'Combat Hate Tracker',
+  icon: '🗡️',
+  defaultState: {
+    enemies: [],
+    activeEnemyId: null,
+    turnOrder: [],
+    abilities: {},
+  } as AggroState,
+  playerInteractive: false,
+  component: AggroTrackerApp,
+  reducer: (state, action, payload) => {
+    const s = state as AggroState
+
+    switch (action) {
+      case 'add-enemy': {
+        const p = payload as { name: string } | undefined
+        if (!p?.name) return s
+        const enemy: AggroEnemy = {
+          id: crypto.randomUUID(),
+          name: p.name,
+          hate: {},
+        }
+        const enemies = [...s.enemies, enemy]
+        return {
+          ...s,
+          enemies,
+          activeEnemyId: s.activeEnemyId ?? enemy.id,
+        }
+      }
+
+      case 'remove-enemy': {
+        const p = payload as { enemyId: string } | undefined
+        if (!p?.enemyId) return s
+        const enemies = s.enemies.filter(e => e.id !== p.enemyId)
+        const activeEnemyId = s.activeEnemyId === p.enemyId
+          ? (enemies[0]?.id ?? null)
+          : s.activeEnemyId
+        return { ...s, enemies, activeEnemyId }
+      }
+
+      case 'select-enemy': {
+        const p = payload as { enemyId: string } | undefined
+        if (!p?.enemyId) return s
+        return { ...s, activeEnemyId: p.enemyId }
+      }
+
+      case 'add-hate': {
+        const p = payload as { enemyId: string; characterId: string; hateType: keyof AggroCharacterHate; amount: number } | undefined
+        if (!p || typeof p.amount !== 'number') return s
+
+        let amount = p.amount
+        const ability = s.abilities?.[p.characterId]
+        let updatedAbilities = s.abilities ?? {}
+
+        if (ability) {
+          switch (ability.type) {
+            case 'stalwart':
+              if (!ability.firstActionUsed) {
+                amount = amount * 2
+                updatedAbilities = {
+                  ...updatedAbilities,
+                  [p.characterId]: { ...ability, firstActionUsed: true },
+                }
+              }
+              if (p.hateType === 'special' && p.amount < 0) {
+                amount = Math.abs(p.amount)
+              }
+              break
+            case 'diversion':
+              if (amount > 0) amount = Math.floor(amount / 2)
+              break
+          }
+        }
+
+        return {
+          ...s,
+          abilities: updatedAbilities,
+          enemies: s.enemies.map(e => {
+            if (e.id !== p.enemyId) return e
+            const current = e.hate[p.characterId] ?? { damage: 0, healing: 0, special: 0 }
+            return {
+              ...e,
+              hate: {
+                ...e.hate,
+                [p.characterId]: {
+                  ...current,
+                  [p.hateType]: current[p.hateType] + amount,
+                },
+              },
+            }
+          }),
+        }
+      }
+
+      case 'activate-ability': {
+        const p = payload as { characterId: string; abilityType: AggroAbilityType } | undefined
+        if (!p) return s
+
+        let newState = { ...s }
+
+        if (p.abilityType === 'lucid-dreaming') {
+          newState = {
+            ...newState,
+            enemies: newState.enemies.map(e => {
+              const current = e.hate[p.characterId]
+              if (!current) return e
+              return {
+                ...e,
+                hate: {
+                  ...e.hate,
+                  [p.characterId]: {
+                    damage: Math.floor(current.damage / 2),
+                    healing: Math.floor(current.healing / 2),
+                    special: Math.floor(current.special / 2),
+                  },
+                },
+              }
+            }),
+          }
+        }
+
+        return {
+          ...newState,
+          abilities: {
+            ...(newState.abilities ?? {}),
+            [p.characterId]: {
+              type: p.abilityType,
+              turnsRemaining: 2,
+              firstActionUsed: false,
+            },
+          },
+        }
+      }
+
+      case 'deactivate-ability': {
+        const p = payload as { characterId: string } | undefined
+        if (!p) return s
+        const abilities = { ...(s.abilities ?? {}) }
+        delete abilities[p.characterId]
+        return { ...s, abilities }
+      }
+
+      case 'next-turn': {
+        const updated: Record<string, AggroActiveAbility> = {}
+        for (const [charId, ability] of Object.entries(s.abilities ?? {})) {
+          const remaining = ability.turnsRemaining - 1
+          if (remaining > 0) {
+            updated[charId] = {
+              ...ability,
+              turnsRemaining: remaining,
+              firstActionUsed: false,
+            }
+          }
+        }
+        return { ...s, abilities: updated }
+      }
+
+      case 'reset-hate': {
+        const p = payload as { enemyId: string } | undefined
+        if (!p?.enemyId) return s
+        return {
+          ...s,
+          enemies: s.enemies.map(e => {
+            if (e.id !== p.enemyId) return e
+            return { ...e, hate: {} }
+          }),
+        }
+      }
+
+      case 'set-turn-order': {
+        const p = payload as { turnOrder: string[] } | undefined
+        if (!p?.turnOrder) return s
+        return { ...s, turnOrder: p.turnOrder }
+      }
+
+      case 'clear': {
+        return { ...s, enemies: [], activeEnemyId: null, turnOrder: [], abilities: {} }
       }
 
       default:

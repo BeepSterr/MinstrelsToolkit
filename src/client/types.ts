@@ -46,6 +46,19 @@ export interface PlaybackState {
   layerVolumes: Record<string, number>
 }
 
+export type CharacterRole = 'NONE' | 'DPS' | 'TANK' | 'HEALER'
+
+export interface Character {
+  id: string
+  campaignId: string
+  name: string
+  description: string
+  role: CharacterRole
+  discordUserId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface DiscordUser {
   id: string
   username: string

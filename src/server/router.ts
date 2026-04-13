@@ -1,6 +1,8 @@
 import * as campaignService from './services/campaign'
 import * as assetService from './services/asset'
 import * as playlistService from './services/playlist'
+import * as characterService from './services/character'
+import * as knownUsersService from './services/knownUsers'
 import { broadcastAssetsUpdated, broadcastPlaylistsUpdated } from './websocket'
 
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '1415063089795039272'
@@ -317,6 +319,63 @@ const routes: Route[] = [
       }
 
       return notFound()
+    },
+  },
+  {
+    pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/characters$/,
+    methods: ['GET', 'POST'],
+    handler: async (req, params) => {
+      const { campaignId } = params
+
+      if (req.method === 'GET') {
+        const characters = await characterService.listCharacters(campaignId)
+        return json(characters)
+      }
+
+      if (req.method === 'POST') {
+        const body = await req.json()
+        if (!body.name) {
+          return badRequest('Name is required')
+        }
+        const character = await characterService.createCharacter(campaignId, body)
+        return json(character, 201)
+      }
+
+      return notFound()
+    },
+  },
+  {
+    pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/characters\/(?<characterId>[^/]+)$/,
+    methods: ['GET', 'PUT', 'DELETE'],
+    handler: async (req, params) => {
+      const { campaignId, characterId } = params
+
+      if (req.method === 'GET') {
+        const character = await characterService.getCharacter(campaignId, characterId)
+        return character ? json(character) : notFound('Character not found')
+      }
+
+      if (req.method === 'PUT') {
+        const body = await req.json()
+        const character = await characterService.updateCharacter(campaignId, characterId, body)
+        return character ? json(character) : notFound('Character not found')
+      }
+
+      if (req.method === 'DELETE') {
+        const success = await characterService.deleteCharacter(campaignId, characterId)
+        return success ? json({ success: true }) : notFound('Character not found')
+      }
+
+      return notFound()
+    },
+  },
+  {
+    pattern: /^\/api\/campaigns\/(?<campaignId>[^/]+)\/known-users$/,
+    methods: ['GET'],
+    handler: async (req, params) => {
+      const { campaignId } = params
+      const users = await knownUsersService.getKnownUsers(campaignId)
+      return json(users)
     },
   },
 ]
