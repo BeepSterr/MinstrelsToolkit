@@ -3,6 +3,8 @@ import * as assetService from './services/asset'
 import * as playlistService from './services/playlist'
 import * as characterService from './services/character'
 import * as knownUsersService from './services/knownUsers'
+import * as sessionService from './services/session'
+import type { DiscordUser } from './types'
 import { broadcastAssetsUpdated, broadcastPlaylistsUpdated } from './websocket'
 
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '1415063089795039272'
@@ -88,11 +90,59 @@ const routes: Route[] = [
         }
 
         const tokenData = await response.json()
-        return json({ access_token: tokenData.access_token })
+
+        // Verify who the token actually belongs to instead of taking the
+        // client's word for it later on the websocket.
+        const profileResponse = await fetch('https://discord.com/api/v10/users/@me', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        })
+
+        if (!profileResponse.ok) {
+          console.error('Discord profile lookup failed:', await profileResponse.text())
+          return json({ error: 'Could not verify Discord identity' }, 502)
+        }
+
+        const profile = await profileResponse.json()
+        const user: DiscordUser = {
+          id: profile.id,
+          username: profile.username,
+          avatar: profile.avatar ?? null,
+          discriminator: profile.discriminator ?? '0',
+          global_name: profile.global_name ?? null,
+        }
+
+        const session = sessionService.createDiscordSession(user, tokenData.expires_in)
+
+        return json({
+          access_token: tokenData.access_token,
+          session_token: session.token,
+          user,
+          expires_at: session.expiresAt,
+        })
       } catch (error) {
         console.error('Discord token exchange error:', error)
         return json({ error: 'Token exchange failed' }, 500)
       }
+    },
+  },
+  {
+    pattern: /^\/api\/session\/guest$/,
+    methods: ['POST'],
+    handler: async (req) => {
+      let username: string | undefined
+      try {
+        const body = await req.json()
+        username = typeof body?.username === 'string' ? body.username : undefined
+      } catch {
+        // Body is optional
+      }
+
+      const session = sessionService.createGuestSession(username)
+      return json({
+        session_token: session.token,
+        user: session.user,
+        expires_at: session.expiresAt,
+      })
     },
   },
   {

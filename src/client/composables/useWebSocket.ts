@@ -27,8 +27,8 @@ const miniAppState = ref<MiniAppState>({ enabledApps: [], appStates: {} })
 const currentUser = ref<DiscordUser | null>(null)
 
 // Reconnection state
-let pendingIdentify: DiscordUser | null = null
-let lastIdentity: DiscordUser | null = null
+let pendingIdentify: string | null = null
+let lastIdentity: string | null = null
 let lastCampaignId: string | null = null
 let reconnectAttempts = 0
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -83,6 +83,16 @@ function handleMessage(event: MessageEvent): void {
         playlistLength: 0,
         nextAssetId: null,
       }
+      break
+    case 'identified':
+      // The server decides who we are; mirror its answer rather than assuming.
+      identified.value = true
+      currentUser.value = message.user
+      break
+    case 'auth-required':
+      identified.value = false
+      currentUser.value = null
+      lastIdentity = null
       break
     case 'user-joined':
       if (!users.value.some((u) => u.id === message.user.id)) {
@@ -154,17 +164,15 @@ export function useWebSocket() {
       error.value = null
       shouldReconnect = true
 
-      // Re-identify if we had an identity before
+      // Re-identify if we had a session before
       if (lastIdentity) {
-        send({ type: 'identify', user: lastIdentity })
-        identified.value = true
+        send({ type: 'identify', sessionToken: lastIdentity })
         // Re-join campaign if we were in one
         if (lastCampaignId) {
           send({ type: 'join-campaign', campaignId: lastCampaignId })
         }
       } else if (pendingIdentify) {
-        send({ type: 'identify', user: pendingIdentify })
-        identified.value = true
+        send({ type: 'identify', sessionToken: pendingIdentify })
         lastIdentity = pendingIdentify
         pendingIdentify = null
       }
@@ -214,15 +222,13 @@ export function useWebSocket() {
     }
   }
 
-  function identify(user: DiscordUser): void {
-    lastIdentity = user
-    currentUser.value = user
+  function identify(sessionToken: string): void {
+    lastIdentity = sessionToken
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      send({ type: 'identify', user })
-      identified.value = true
+      send({ type: 'identify', sessionToken })
     } else {
       // Store for later when connection opens
-      pendingIdentify = user
+      pendingIdentify = sessionToken
     }
   }
 

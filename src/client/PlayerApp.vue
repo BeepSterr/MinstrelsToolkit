@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import type { Campaign } from './types'
 import PlayerCampaignSelect from './components/PlayerCampaignSelect.vue'
 import PlayerPlaybackView from './components/PlayerPlaybackView.vue'
@@ -8,15 +8,39 @@ import { useWebSocket } from './composables/useWebSocket'
 
 const selectedCampaign = ref<Campaign | null>(null)
 
-const { user, ready: discordReady, error: discordError, initAndAuthenticate } = useDiscordAuth()
-const { connect, identify } = useWebSocket()
+const {
+  user,
+  sessionToken,
+  isGuest,
+  ready: discordReady,
+  error: discordError,
+  initAndAuthenticate,
+  reauthenticate,
+} = useDiscordAuth()
+const { connect, identify, onMessage } = useWebSocket()
 
-// When Discord auth completes and we have a user, connect to WebSocket and identify
-watch(user, (newUser) => {
-  if (newUser) {
-    identify(newUser)
+// When auth completes and we have a session, connect to WebSocket and identify
+watch(sessionToken, (token) => {
+  if (token) {
+    identify(token)
     connect()
   }
+})
+
+// The server rejects sessions it no longer knows (expired, or it restarted) -
+// authenticate again and identify with the new session.
+const unsubscribe = onMessage((message) => {
+  if (message.type === 'auth-required') {
+    reauthenticate().then(() => {
+      if (sessionToken.value) {
+        identify(sessionToken.value)
+      }
+    })
+  }
+})
+
+onUnmounted(() => {
+  unsubscribe()
 })
 
 function handleSelect(campaign: Campaign) {
@@ -44,6 +68,10 @@ onMounted(() => {
     <template v-else>
       <div v-if="discordError" class="discord-warning">
         {{ discordError }}
+      </div>
+
+      <div v-else-if="isGuest" class="guest-notice">
+        Playing as {{ user?.username }}
       </div>
 
       <PlayerPlaybackView
@@ -104,6 +132,14 @@ body {
 .discord-warning {
   background: #faa61a;
   color: #000;
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.guest-notice {
+  background: #4f545c;
+  color: #fff;
   padding: 0.5rem 1rem;
   text-align: center;
   font-size: 0.875rem;

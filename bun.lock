@@ -5,7 +5,7 @@
     "": {
       "name": "bardbox2",
       "dependencies": {
-        "@discord/embedded-app-sdk": "^1.4.3",
+        "@discord/embedded-app-sdk": "^2.5.0",
         "idb": "^8.0.0",
         "vue": "^3.4.21",
         "vue-router": "^4.3.0",
@@ -27,7 +27,7 @@
 
     "@babel/types": ["@babel/types@7.28.6", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-0ZrskXVEHSWIqZM/sQZ4EV3jZJXRkio/WCxaqKZP1g//CEWEPSfeZFcms4XeKBCHU0ZKnIkdJeU/kF+eRp5lBg=="],
 
-    "@discord/embedded-app-sdk": ["@discord/embedded-app-sdk@1.9.0", "", { "dependencies": { "@types/lodash.transform": "^4.6.6", "@types/uuid": "^10.0.0", "big-integer": "^1.6.48", "decimal.js-light": "^2.5.0", "eventemitter3": "^5.0.0", "lodash.transform": "^4.6.0", "uuid": "^10.0.0", "zod": "^3.9.8" } }, "sha512-aesQGKyhQgcxuY4/iJoylFfFaynZeU70Y5nqDtFNQ6Hs11LH+Xly7CfD6AhkTNssIyLljEkxG5ZYLU6Bj6n1kw=="],
+    "@discord/embedded-app-sdk": ["@discord/embedded-app-sdk@2.5.0", "", { "dependencies": { "@types/lodash.transform": "^4.6.6", "@types/uuid": "^10.0.0", "big-integer": "^1.6.48", "decimal.js-light": "^2.5.0", "eventemitter3": "^5.0.0", "lodash.transform": "^4.6.0", "uuid": "^11.0.0", "zod": "^3.9.8" } }, "sha512-FNoe5PbSkoKEbqPubaBmq6tlEMOftMjR3gu55YrdrrKmBfKKM4i9P/Z+Zxl0RZdJcKviBwVcTyYMMPM/aGex/w=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.21.5", "", { "os": "aix", "cpu": "ppc64" }, "sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ=="],
 
@@ -199,7 +199,7 @@
 
     "undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
-    "uuid": ["uuid@10.0.0", "", { "bin": { "uuid": "dist/bin/uuid" } }, "sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ=="],
+    "uuid": ["uuid@11.1.1", "", { "bin": { "uuid": "dist/esm/bin/uuid" } }, "sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ=="],
 
     "vite": ["vite@5.4.21", "", { "dependencies": { "esbuild": "^0.21.3", "postcss": "^8.4.43", "rollup": "^4.20.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^18.0.0 || >=20.0.0", "less": "*", "lightningcss": "^1.21.0", "sass": "*", "sass-embedded": "*", "stylus": "*", "sugarss": "*", "terser": "^5.4.0" }, "optionalPeers": ["@types/node", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser"], "bin": { "vite": "bin/vite.js" } }, "sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw=="],
 

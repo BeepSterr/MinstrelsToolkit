@@ -68,7 +68,7 @@ export interface DiscordUser {
 }
 
 export type ClientMessage =
-  | { type: 'identify'; user: DiscordUser }
+  | { type: 'identify'; sessionToken: string }
   | { type: 'join-campaign'; campaignId: string }
   | { type: 'leave-campaign' }
   | { type: 'playback-command'; command: 'play' | 'pause' | 'seek' | 'next' | 'prev'; time?: number }
@@ -97,6 +97,8 @@ export type ServerMessage =
   | { type: 'asset-selected'; assetId: string | null }
   | { type: 'assets-updated'; campaignId: string }
   | { type: 'playlists-updated'; campaignId: string }
+  | { type: 'identified'; user: DiscordUser }
+  | { type: 'auth-required' }
   | { type: 'user-joined'; user: DiscordUser; syncProgress: number }
   | { type: 'user-left'; userId: string }
   | { type: 'user-sync-progress'; userId: string; progress: number }

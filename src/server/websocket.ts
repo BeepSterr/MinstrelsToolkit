@@ -10,6 +10,7 @@ import type {
 } from './types'
 import * as playlistService from './services/playlist'
 import { addKnownUser } from './services/knownUsers'
+import { getSession } from './services/session'
 import { loadAggroState, saveAggroState } from './services/aggroState'
 
 const rooms = new Map<string, RoomState>()
@@ -123,7 +124,7 @@ export function handleMessage(
 
   switch (message.type) {
     case 'identify':
-      handleIdentify(ws, message.user)
+      handleIdentify(ws, message.sessionToken)
       break
     case 'join-campaign':
       handleJoinCampaign(ws, message.campaignId)
@@ -180,9 +181,22 @@ export function handleMessage(
 
 function handleIdentify(
   ws: ServerWebSocket<WebSocketData>,
-  user: DiscordUser
+  sessionToken: string
 ): void {
-  ws.data.user = user
+  const session = getSession(sessionToken)
+
+  // Identity comes from the server-side session, never from the client - the
+  // token is the only thing a player is allowed to assert about themselves.
+  if (!session) {
+    ws.data.user = null
+    ws.data.isGuest = false
+    send(ws, { type: 'auth-required' })
+    return
+  }
+
+  ws.data.user = session.user
+  ws.data.isGuest = session.isGuest
+  send(ws, { type: 'identified', user: session.user })
 }
 
 function handleJoinCampaign(
@@ -205,8 +219,11 @@ function handleJoinCampaign(
     room.users.set(id, user)
     room.userSyncProgress.set(id, 0)  // Start at 0% sync progress
     broadcast(campaignId, { type: 'user-joined', user, syncProgress: 0 }, id)
-    // Cache user info for character assignment
-    addKnownUser(campaignId, user).catch(() => {})
+    // Cache user info for character assignment - guests are not real
+    // identities, so they never end up in the campaign's known users
+    if (!ws.data.isGuest) {
+      addKnownUser(campaignId, user).catch(() => {})
+    }
   }
 
   // Build users array with sync progress for each user
@@ -1243,6 +1260,7 @@ export function createWebSocketData(): WebSocketData {
     id: crypto.randomUUID(),
     campaignId: null,
     user: null,
+    isGuest: false,
   }
 }
 

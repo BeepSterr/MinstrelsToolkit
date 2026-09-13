@@ -10,7 +10,6 @@ import type { WebSocketData } from './types'
 const PORT = parseInt(process.env.PORT || process.env.VIRTUAL_PORT || '3000')
 const CLIENT_DIR = './dist/client'
 
-console.log(process.env.DISCORD_CLIENT_SECRET)
 async function serveStatic(path: string): Promise<Response | null> {
   // Admin routes serve the admin app
   if (path === '/admin' || path.startsWith('/admin/')) {

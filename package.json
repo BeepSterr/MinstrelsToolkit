@@ -10,7 +10,7 @@
     "client:dev": "vite"
   },
   "dependencies": {
-    "@discord/embedded-app-sdk": "^1.4.3",
+    "@discord/embedded-app-sdk": "^2.5.0",
     "idb": "^8.0.0",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
