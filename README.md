@@ -83,7 +83,10 @@ bun run start
 |----------|-------------|
 | `DISCORD_CLIENT_ID` | Your Discord application's client ID |
 | `DISCORD_CLIENT_SECRET` | Your Discord application's client secret |
+| `DISCORD_CLIENT_SECRET_FILE` | Path to a file holding the secret; wins over `DISCORD_CLIENT_SECRET` |
 | `PORT` | Server port (default: 3000) |
+
+Any variable `NAME` can also be supplied as `NAME_FILE`, the path to a file containing the value (one trailing newline is stripped); the server reads it at startup and fails to start if the file is unreadable or empty.
 
 ## Tech Stack
 

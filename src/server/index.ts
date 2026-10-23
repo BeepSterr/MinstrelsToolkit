@@ -1,3 +1,4 @@
+import './secrets'
 import { handleRequest } from './router'
 import {
   handleOpen,
