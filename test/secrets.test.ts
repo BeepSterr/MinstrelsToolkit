@@ -70,12 +70,24 @@ describe('loadFileSecrets', () => {
   })
 
   test('error never contains file content', () => {
-    const p = write('dir-ish', 'topsecret')
-    const env: Record<string, string | undefined> = { X_FILE: path.join(p, 'x') }
-    try {
-      loadFileSecrets(env)
-    } catch (e) {
-      expect(String(e)).not.toContain('topsecret')
-    }
+    // A directory fails the read with EISDIR; the file next to it holds content
+    // that must not leak into the message.
+    const marker = 'DISTINCTIVE-SECRET-xyzzy'
+    write('leaky', marker)
+    const d = path.join(dir, 'a-directory')
+    fs.mkdirSync(d)
+    const env: Record<string, string | undefined> = { X_FILE: d }
+    let message = ''
+    expect(() => {
+      try {
+        loadFileSecrets(env)
+      } catch (e) {
+        message = String(e)
+        throw e
+      }
+    }).toThrow()
+    expect(message).toContain('X_FILE')
+    expect(message).toContain(d)
+    expect(message).not.toContain(marker)
   })
 })
